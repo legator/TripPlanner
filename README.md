@@ -133,7 +133,7 @@ See `src/lib/tripPlanner.ts` and `src/lib/tripPlanEditor.ts` for the core logic.
 - Use a browser‑restricted key for `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` and a server key for server-side calls.
 - If enabling short‑link sharing backed by KV, set `KV_REST_API_URL` and `KV_REST_API_TOKEN` in your environment.
 - Do not commit secret keys to source control.
-```
+
 ## License
 
 MIT
