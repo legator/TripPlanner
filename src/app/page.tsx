@@ -115,7 +115,7 @@ export default function Home() {
     } finally {
       setIsPlanning(false);
     }
-  }, [waypoints, settings]);
+  }, [waypoints, settings, mapProvider]);
 
   const handleReset = useCallback(() => {
     setTripPlan(null);
@@ -161,7 +161,7 @@ export default function Home() {
           )
         : prev
     );
-  }, [settings.checkoutTime, settings.checkinTime]);
+  }, [settings.checkoutTime, settings.checkinTime, settings.fuelPricePerLiter, settings.fuelEfficiencyLPer100km]);
 
   const handleOptimizeRoute = useCallback(async (dayIndex: number) => {
     if (!tripPlan) return;
@@ -226,7 +226,7 @@ export default function Home() {
     } finally {
       setIsPlanning(false);
     }
-  }, [settings]);
+  }, [settings, mapProvider]);
 
   const addWaypoint = (wp: Waypoint) => setWaypoints((prev) => [...prev, wp]);
 

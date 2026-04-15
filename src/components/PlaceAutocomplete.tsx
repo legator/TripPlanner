@@ -91,7 +91,7 @@ export default function PlaceAutocomplete({
       }
       elementCreatedRef.current = false;
     };
-  }, [isLoaded]);
+  }, [isLoaded, placeholder]);
 
   if (!isLoaded) {
     return (
