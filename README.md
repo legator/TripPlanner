@@ -49,18 +49,48 @@ A smart road-trip itinerary planner built with **Next.js 14**, **TypeScript**, *
 | Places | Google Places API v1 (Nearby Search) |
 | Map Loader | @googlemaps/js-api-loader |
 | Date utilities | date-fns 3 |
+# TripPlanner — Road‑trip itinerary planner 🚗
+
+TripPlanner is a multi‑provider road‑trip itinerary planner that generates editable, multi‑day driving plans with hotels, gas stops, attractions, and exports. Built with Next.js + TypeScript and supports both Google Maps and HERE as routing/place providers.
+1. **Node.js** 18+ installed
+## Features
+
+- Multi‑provider maps: Google Maps (Directions + Places) and HERE routing/place services
+- Route planning & optimization: add waypoints and get an optimized driving order per-day
+- Day splitting: automatically groups route legs into daily driving segments
+- Hotel suggestions, gas & EV charging stops, attractions, and restaurant recommendations
+- Traffic‑aware ETAs (Google) for future departure dates
+- Weather forecasts (Open‑Meteo) on day cards
+- Budget & fuel-cost summary (per‑day and total) using configurable fuel price and efficiency
+- Saved trips (localStorage) and import/export (CSV, GPX, KML, iCal)
+- Collaborative share: short links backed by a KV store (optional) or hash‑based share
+- Editable plan: insert overnight stops, toggle rest days, and re‑optimize individual days
+- Accessible UI, dark-mode-aware styles, and mobile responsive layout
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 14 (App Router) |
+| Language | TypeScript |
+| Styling | Tailwind CSS |
+| Maps / Routing | Google Maps & HERE (provider abstraction) |
+| Places | Google Places API v1, HERE Browse API |
+| Weather | Open‑Meteo |
+| Short links / KV | Vercel KV (optional) |
+| Utilities | date‑fns, @googlemaps/js-api-loader, @here/flexpolyline |
 
 ## Prerequisites
 
-1. **Node.js** 18+ installed
-2. A **Google Maps Platform API Key** with these APIs enabled:
-   - Maps JavaScript API
-   - Directions API
-   - Places API (New)
-   - Geocoding API
+1. Node.js 18+ installed
+2. API keys (one or more):
+   - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` — browser key for Maps JS and Places (recommended with HTTP referrer restrictions)
+   - `GOOGLE_MAPS_API_KEY` — server key for Directions/Places server calls (keep secret)
+   - `NEXT_PUBLIC_HERE_API_KEY` / `HERE_API_KEY` — optional HERE keys if you use HERE as a provider
+   - (Optional) `KV_REST_API_URL` and `KV_REST_API_TOKEN` — to enable short‑link sharing via a KV store
 
-   Get your key at: https://console.cloud.google.com/google/maps-apis
-
+   Enable the Google APIs you need in Google Cloud Console: Maps JavaScript API, Directions API, Places API, Geocoding API.
+|----------|---------|---------|
 ## Setup
 
 ```bash
@@ -70,83 +100,43 @@ npm install
 # 2. Create your environment file
 cp env.local.example .env.local
 
-# 3. Fill in your API keys in .env.local:
-#    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<browser key>
-#    GOOGLE_MAPS_API_KEY=<server key>
+# 3. Add your API keys to .env.local (see Prerequisites above)
 
 # 4. Start the development server
 npm run dev
 ```
 
 Open http://localhost:3000 in your browser.
-
-## Environment Variables
-
-| Variable | Used by | Purpose |
-|----------|---------|---------|
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Browser | Maps JS API, Places Autocomplete |
-| `GOOGLE_MAPS_API_KEY` | Server (`/api/plan`) | Directions API, Places API v1 |
-
-> **Tip**: You can use the same key for both variables, but restricting each key to its respective usage (HTTP referrer vs. server IP) is recommended for production.
-
+│  (sidebar, cards)    │              │                      │
 ## How It Works
 
-### Architecture
+The app is split between a client UI (Maps, place autocomplete, and interactive plan editing) and a server planner (the API route that calls routing/place services and runs the trip algorithm).
 
-```
-User Browser                          Next.js Server
-┌──────────────────────┐              ┌──────────────────────┐
-│  Google Maps JS API  │              │  /api/plan           │
-│  (map, autocomplete) │─── POST ───▶│  ├─ Directions API   │
-│                      │              │  ├─ Places API v1    │
-│  React Components    │◀── JSON ────│  └─ Trip Algorithm   │
-│  (sidebar, cards)    │              │                      │
-└──────────────────────┘              └──────────────────────┘
-```
+High level flow:
+- Client collects waypoints and settings and POSTs `/api/plan` (includes selected provider)
+- Server calls the chosen routing provider (Google or HERE) to build the route and legs
+- Server groups legs into daily chunks, searches nearby places (hotels, gas, attractions), and returns a `TripPlan` JSON
+- Client renders the plan and allows edits (rest days, overnight stops) that are re-applied on re-plan
 
-### Trip Planning Algorithm
-
-1. **Route Optimization** — Waypoints sent to Directions API with `optimize:true`
-2. **Day Splitting** — Legs grouped into days respecting max time and distance limits
-3. **Parallel Place Search** — Hotels, gas, EV charging, campgrounds, attractions, and restaurants fetched concurrently via `Promise.all()`
-4. **Fuel Cost Calculation** — `(distanceKm / 100) × efficiency × price` computed per day and summed
-5. **Schedule Generation** — Timed events built from checkout time, driving duration, and sightseeing minutes per stop
-
-### Project Structure
-
-```
-src/
-├── app/
-│   ├── layout.tsx              # Root layout
-│   ├── page.tsx                # Main page — state, persistence, dark mode
-│   ├── globals.css             # Global styles
-│   └── api/plan/route.ts       # Trip planning API (with rate limiting)
-├── components/
-│   ├── ErrorBoundary.tsx       # React error boundary
+See `src/lib/tripPlanner.ts` and `src/lib/tripPlanEditor.ts` for the core logic.
 │   ├── GoogleMapsProvider.tsx  # Maps JS API loader + context
-│   ├── MapView.tsx             # Interactive map with markers & polylines
-│   ├── Sidebar.tsx             # Left panel — waypoints, settings, exports
-│   ├── PlaceAutocomplete.tsx   # Google Places autocomplete input
-│   ├── WaypointList.tsx        # Manage trip waypoints
-│   ├── TripSettings.tsx        # Configure trip parameters (incl. fuel)
-│   ├── TripPlanView.tsx        # Day list + cost summary
-│   ├── DayCard.tsx             # Individual day card with all POI sections
-│   └── PlaceCard.tsx           # Compact place display
-└── lib/
-    ├── types.ts                # All shared TypeScript interfaces
-    ├── constants.ts            # Defaults, radii, colors, marker icons
-    ├── tripPlanner.ts          # Core server-side planning engine
-    ├── tripPlanEditor.ts       # Rest days, day-boundary shifts
-    ├── tripOptimization.ts     # Per-day route reordering
-    ├── tripGpxExport.ts        # GPX export + decodePolyline utility
-    ├── tripKmlExport.ts        # KML export
-    ├── tripCsvExport.ts        # CSV export
-    ├── tripIcalExport.ts       # iCalendar (.ics) export
-    ├── tripShare.ts            # URL hash encode/decode + clipboard
-    └── tripStorage.ts          # localStorage save/load/clear
-```
-
 ## Usage
+
+1. Add a starting point and destinations via the autocomplete
+2. Adjust `Trip Settings` (driving limits, fuel settings, rest day interval)
+3. Click `Plan My Trip` to generate the itinerary
+4. Use `Details` on each day to view hotels, gas, attractions, and weather
+5. Share the trip (short link) or export as CSV/GPX/KML/iCal
+│   ├── DayCard.tsx             # Individual day card with all POI sections
+## API Keys & Security
+
+- Use a browser‑restricted key for `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` and a server key for server-side calls.
+- If enabling short‑link sharing backed by KV, set `KV_REST_API_URL` and `KV_REST_API_TOKEN` in your environment.
+- Do not commit secret keys to source control.
+```
+## License
+
+MIT
 
 1. **Add Waypoints** — Search for your departure and all destinations using the autocomplete input
 2. **Configure Settings** — Adjust driving limits, fuel range, fuel cost, rest-day frequency, and more
