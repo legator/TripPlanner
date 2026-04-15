@@ -18,11 +18,11 @@ export default function PlaceCard({ place, icon, compact = false }: PlaceCardPro
     return (
       <button
         onClick={openInMaps}
-        className="flex items-center gap-2 w-full text-left p-1.5 rounded hover:bg-gray-100 transition-colors group"
+        className="flex items-center gap-2 w-full text-left p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
       >
         <span className="text-sm flex-shrink-0">{icon}</span>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-gray-700 truncate group-hover:text-primary-600">
+          <p className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate group-hover:text-primary-600">
             {place.name}
           </p>
         </div>
@@ -38,15 +38,15 @@ export default function PlaceCard({ place, icon, compact = false }: PlaceCardPro
   return (
     <button
       onClick={openInMaps}
-      className="flex items-start gap-2.5 w-full text-left p-2.5 rounded-lg border border-gray-100 
-                 hover:border-primary-200 hover:bg-primary-50/50 transition-all group"
+      className="flex items-start gap-2.5 w-full text-left p-2.5 rounded-lg border border-gray-100 dark:border-gray-700
+                 hover:border-primary-200 hover:bg-primary-50/50 dark:hover:bg-primary-900/20 transition-all group"
     >
       <span className="text-lg flex-shrink-0 mt-0.5">{icon}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 group-hover:text-primary-700 truncate">
+        <p className="text-sm font-medium text-gray-800 dark:text-white group-hover:text-primary-700 truncate">
           {place.name}
         </p>
-        <p className="text-xs text-gray-500 truncate mt-0.5">
+        <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
           {place.vicinity || place.address}
         </p>
         <div className="flex items-center gap-2 mt-1">
@@ -54,7 +54,7 @@ export default function PlaceCard({ place, icon, compact = false }: PlaceCardPro
             <span className="text-xs text-amber-600">★ {place.rating}</span>
           )}
           {place.priceLevel !== undefined && (
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-gray-400 dark:text-gray-500">
               {'$'.repeat(place.priceLevel)}
             </span>
           )}
@@ -70,7 +70,7 @@ export default function PlaceCard({ place, icon, compact = false }: PlaceCardPro
         </div>
       </div>
       <svg
-        className="w-4 h-4 text-gray-300 group-hover:text-primary-400 flex-shrink-0 mt-1"
+        className="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-primary-400 flex-shrink-0 mt-1"
         fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
       >
         <path

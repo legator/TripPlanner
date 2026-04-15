@@ -4,7 +4,7 @@ import { TripPlan, LatLng } from './types';
  * Convert encoded polyline to array of lat/lng coordinates
  * Based on Google Maps' polyline encoding algorithm
  */
-function decodePolyline(encoded: string): LatLng[] {
+export function decodePolyline(encoded: string): LatLng[] {
   const points: LatLng[] = [];
   let index = 0;
   let lat = 0;

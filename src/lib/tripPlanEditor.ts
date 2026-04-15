@@ -32,7 +32,6 @@ function addMinutesToTime(time: string, minutes: number): string {
 /** Rebuild a driving day's computed fields from its segments array. */
 function rebuildDayFromSegments(day: DayPlan, checkoutTime: string, checkinTime: string): DayPlan {
   const segs = day.segments;
-  console.log('[rebuildDay] dayNumber:', day.dayNumber, 'segments:', segs.length, 'checkout:', checkoutTime, 'checkin:', checkinTime);
   if (segs.length === 0) return day; // rest day or empty
 
   const distanceKm = segs.reduce((s, seg) => s + seg.distanceKm, 0);
@@ -40,7 +39,6 @@ function rebuildDayFromSegments(day: DayPlan, checkoutTime: string, checkinTime:
   const polylineSegments = segs.flatMap((seg) => seg.polylineSegments);
   const startLocation = { name: segs[0].startName, location: segs[0].startLocation };
   const endLocation = { name: segs[segs.length - 1].endName, location: segs[segs.length - 1].endLocation };
-  console.log('[rebuildDay] totals - distance:', distanceKm, 'km, duration:', durationMinutes, 'min, start:', startLocation.name, 'end:', endLocation.name);
   const mainStops = segs.slice(0, -1).map((seg) => ({
     name: seg.endName,
     location: seg.endLocation,
@@ -153,6 +151,9 @@ export function toggleRestDay(plan: TripPlan, dayIndex: number): TripPlan {
       hotelSuggestions: day.hotelSuggestions,
       attractions: day.attractions,
       restaurants: day.restaurants,
+      evChargingStops: [],
+      campgrounds: day.campgrounds ?? [],
+      estimatedFuelCost: 0,
       polylineSegments: [],
       schedule: [
         { type: 'rest_day', time: '09:00', title: 'Sleep in & relax', durationMinutes: 0, icon: '😴' },
@@ -181,9 +182,6 @@ export function setDayEndAtSegment(
 ): TripPlan {
   const days = [...plan.days.map((d) => ({ ...d, segments: [...d.segments] }))];
   const thisDay = days[dayIndex];
-  console.log('[setDayEnd] dayIndex:', dayIndex, 'newSegmentCount:', newSegmentCount,
-    'thisDay.segments.length:', thisDay.segments.length,
-    'isRestDay:', thisDay.isRestDay, 'totalDays:', days.length);
   if (thisDay.isRestDay || thisDay.segments.length === 0) {
     console.log('[setDayEnd] BAIL: rest day or no segments');
     return plan;
@@ -228,15 +226,12 @@ export function setDayEndAtSegment(
       // Next driving day is now empty — remove it.
       // Also remove any orphaned rest days between this day and the next driving day.
       const removeCount = nextDrivingIdx - dayIndex; // includes rest days in between + the next driving day
-      console.log('[setDayEnd] ABSORB: removing', removeCount, 'days from index', dayIndex + 1);
       days.splice(dayIndex + 1, removeCount);
     } else {
-      console.log('[setDayEnd] SPLIT: next driving day keeps', remainingSegments.length, 'segments');
       days[nextDrivingIdx].segments = remainingSegments;
       days[nextDrivingIdx] = rebuildDayFromSegments(days[nextDrivingIdx], checkoutTime, checkinTime);
     }
   } else if (remainingSegments.length > 0) {
-    console.log('[setDayEnd] OVERFLOW: creating new day with', remainingSegments.length, 'segments');
     // No next driving day existed — create one for the overflow
     const newDay: DayPlan = {
       dayNumber: 0,
@@ -251,6 +246,8 @@ export function setDayEndAtSegment(
       distanceKm: 0,
       durationMinutes: 0,
       gasStops: [],
+      evChargingStops: [],
+      campgrounds: [],
       hotelSuggestions: [],
       attractions: [],
       restaurants: [],

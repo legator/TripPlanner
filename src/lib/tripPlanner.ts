@@ -1,8 +1,7 @@
 import { Place, PlaceType, DayPlan, DaySegment, TripPlan, Waypoint, TripSettings, ScheduleEvent } from './types';
 import { FUEL_BUFFER_FACTOR, SEARCH_RADIUS } from './constants';
 import { addDays, format } from 'date-fns';
-
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!;
+import { getRoutingProvider, RouteLeg, RouteStep, NearbyPlace } from './providers';
 
 // ─── Time helpers ───────────────────────────────────────────────────────────
 
@@ -15,197 +14,61 @@ function addMinutesToTime(time: string, minutes: number): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
-// ─── Google Maps REST API Helpers ───────────────────────────────────────────
+// ─── Place type mapping ──────────────────────────────────────────────────────
 
-interface DirectionsLeg {
-  distance: { value: number; text: string };
-  duration: { value: number; text: string };
-  start_address: string;
-  end_address: string;
-  start_location: { lat: number; lng: number };
-  end_location: { lat: number; lng: number };
-  steps: Array<{
-    distance: { value: number };
-    duration: { value: number };
-    start_location: { lat: number; lng: number };
-    end_location: { lat: number; lng: number };
-    polyline: { points: string };
-  }>;
-}
-
-interface DirectionsRoute {
-  legs: DirectionsLeg[];
-  waypoint_order: number[];
-  overview_polyline: { points: string };
-}
-
-async function getDirections(
-  origin: Waypoint,
-  destination: Waypoint,
-  intermediateWaypoints: Waypoint[],
-  settings: TripSettings
-): Promise<DirectionsRoute> {
-  const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
-
-  // Helper: prefer place_id for accurate routing (avoids ZERO_RESULTS for
-  // coordinates that land on non‑routable locations like mountain peaks)
-  const toDirectionsParam = (wp: Waypoint) =>
-    wp.placeId ? `place_id:${wp.placeId}` : `${wp.location.lat},${wp.location.lng}`;
-
-  url.searchParams.set('origin', toDirectionsParam(origin));
-  url.searchParams.set('destination', toDirectionsParam(destination));
-  url.searchParams.set('key', GOOGLE_MAPS_API_KEY);
-  url.searchParams.set('units', 'metric');
-
-  if (intermediateWaypoints.length > 0) {
-    const wpParam = intermediateWaypoints
-      .map((w) => toDirectionsParam(w))
-      .join('|');
-    url.searchParams.set('waypoints', `optimize:true|${wpParam}`);
-  }
-
-  const avoid: string[] = [];
-  if (settings.avoidTolls) avoid.push('tolls');
-  if (settings.avoidHighways) avoid.push('highways');
-  if (avoid.length > 0) url.searchParams.set('avoid', avoid.join('|'));
-
-  const response = await fetch(url.toString());
-  const data = await response.json();
-
-  console.log('[Directions API] Request URL:', url.toString().replace(GOOGLE_MAPS_API_KEY, 'KEY_HIDDEN'));
-  console.log('[Directions API] Status:', data.status, data.error_message || '');
-  console.log('[Directions API] Routes found:', data.routes?.length || 0);
-  if (data.geocoded_waypoints) {
-    console.log('[Directions API] Geocoded waypoints:', JSON.stringify(data.geocoded_waypoints));
-  }
-
-  if (data.status !== 'OK') {
-    if (data.status === 'ZERO_RESULTS') {
-      throw new Error(
-        'No driving route found between the selected places. Make sure all locations are reachable by car (not separated by ocean, on different continents without road connections, etc.).'
-      );
-    }
-    if (data.status === 'NOT_FOUND') {
-      throw new Error(
-        'One or more locations could not be found. Please check your waypoints and try again.'
-      );
-    }
-    if (data.status === 'MAX_WAYPOINTS_EXCEEDED') {
-      throw new Error(
-        'Too many waypoints. Google Directions API supports up to 25 waypoints. Please reduce the number of stops.'
-      );
-    }
-    throw new Error(`Directions API error: ${data.status} - ${data.error_message || 'Please check your API key and enabled APIs.'}`);
-  }
-
-  return data.routes[0];
-}
-
-async function searchNearbyPlaces(
-  location: { lat: number; lng: number },
-  type: string,
-  radius: number,
-  maxResults: number = 5
-): Promise<Place[]> {
-  // Use the new Places API (v1) - required for new customers
-  const url = 'https://places.googleapis.com/v1/places:searchNearby';
-
-  const requestBody: any = {
-    includedTypes: [type],
-    maxResultCount: Math.min(maxResults, 20),
-    locationRestriction: {
-      circle: {
-        center: {
-          latitude: location.lat,
-          longitude: location.lng,
-        },
-        radius: radius,
-      },
-    },
-    rankPreference: 'POPULARITY',
-  };
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.shortFormattedAddress,places.currentOpeningHours,places.photos',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    const data = await response.json();
-
-    if (data.error) {
-      console.error(`Places API (New) error for type ${type}:`, data.error.message);
-      return [];
-    }
-
-    const results = data.places || [];
-
-    return results.map((place: any) => ({
-      id: place.id || '',
-      name: place.displayName?.text || 'Unknown',
-      address: place.formattedAddress || '',
-      location: {
-        lat: place.location?.latitude || 0,
-        lng: place.location?.longitude || 0,
-      },
-      type: mapGoogleType(type),
-      rating: place.rating,
-      priceLevel: mapPriceLevel(place.priceLevel),
-      vicinity: place.shortFormattedAddress || place.formattedAddress || '',
-      isOpen: place.currentOpeningHours?.openNow,
-      photoUrl: place.photos?.[0]?.name
-        ? `https://places.googleapis.com/v1/${place.photos[0].name}/media?maxWidthPx=200&key=${GOOGLE_MAPS_API_KEY}`
-        : undefined,
-    }));
-  } catch (error) {
-    console.error(`Error searching for ${type}:`, error);
-    return [];
-  }
-}
-
-function mapPriceLevel(priceLevel?: string): number | undefined {
-  if (!priceLevel) return undefined;
-  const map: Record<string, number> = {
-    PRICE_LEVEL_FREE: 0,
-    PRICE_LEVEL_INEXPENSIVE: 1,
-    PRICE_LEVEL_MODERATE: 2,
-    PRICE_LEVEL_EXPENSIVE: 3,
-    PRICE_LEVEL_VERY_EXPENSIVE: 4,
-  };
-  return map[priceLevel];
-}
-
-function mapGoogleType(type: string): PlaceType {
+function mapProviderType(type: string): PlaceType {
   switch (type) {
     case 'lodging': return PlaceType.HOTEL;
     case 'gas_station': return PlaceType.GAS_STATION;
     case 'tourist_attraction': return PlaceType.ATTRACTION;
     case 'restaurant': return PlaceType.RESTAURANT;
+    case 'electric_vehicle_charging_station': return PlaceType.EV_CHARGING;
+    case 'campground': return PlaceType.CAMPGROUND;
     default: return PlaceType.ATTRACTION;
   }
+}
+
+function toPlace(p: NearbyPlace): Place {
+  return {
+    id: p.id,
+    name: p.name,
+    address: p.address,
+    location: p.location,
+    type: mapProviderType(p.type),
+    rating: p.rating,
+    priceLevel: p.priceLevel,
+    vicinity: p.address,
+    isOpen: p.isOpen,
+    photoUrl: p.photoUrl,
+  };
+}
+
+async function findNearby(
+  location: { lat: number; lng: number },
+  type: string,
+  radius: number,
+  maxResults = 5
+): Promise<Place[]> {
+  const provider = getRoutingProvider();
+  const results = await provider.searchNearby(location, type, radius, maxResults);
+  return results.map(toPlace);
 }
 
 // ─── Route Sampling ─────────────────────────────────────────────────────────
 
 function samplePointsAlongLegs(
-  legs: DirectionsLeg[],
+  legs: RouteLeg[],
   intervalKm: number
 ): { lat: number; lng: number }[] {
   const points: { lat: number; lng: number }[] = [];
-  let accumulatedDistance = 0;
-  let nextSampleAt = intervalKm * 1000; // Convert to meters
+  let accumulated = 0;
+  let nextSampleAt = intervalKm * 1000;
 
   for (const leg of legs) {
     for (const step of leg.steps) {
-      accumulatedDistance += step.distance.value;
-
-      if (accumulatedDistance >= nextSampleAt) {
-        points.push(step.end_location);
+      accumulated += step.distanceMeters;
+      if (accumulated >= nextSampleAt) {
+        points.push(step.endLocation);
         nextSampleAt += intervalKm * 1000;
       }
     }
@@ -214,24 +77,21 @@ function samplePointsAlongLegs(
   return points;
 }
 
-function getMidpointOfLegs(legs: DirectionsLeg[]): { lat: number; lng: number } {
+function getMidpointOfLegs(legs: RouteLeg[]): { lat: number; lng: number } {
   let totalDistance = 0;
-  for (const leg of legs) totalDistance += leg.distance.value;
+  for (const leg of legs) totalDistance += leg.distanceMeters;
 
   let halfDistance = totalDistance / 2;
   let accumulated = 0;
 
   for (const leg of legs) {
     for (const step of leg.steps) {
-      accumulated += step.distance.value;
-      if (accumulated >= halfDistance) {
-        return step.end_location;
-      }
+      accumulated += step.distanceMeters;
+      if (accumulated >= halfDistance) return step.endLocation;
     }
   }
 
-  // Fallback: return start of first leg
-  return legs[0].start_location;
+  return legs[0].startLocation;
 }
 
 // ─── Main Trip Planner ──────────────────────────────────────────────────────
@@ -249,24 +109,18 @@ export async function planTrip(
   // optimised by the Directions API (`optimize:true`) to minimise
   // total driving distance.
   const origin = waypoints[0];
-  const destination = waypoints[0]; // always return home
-  const intermediates = waypoints.slice(1);
+  const destination = settings.oneWayTrip
+    ? waypoints[waypoints.length - 1]
+    : waypoints[0]; // return home
+  const intermediates = settings.oneWayTrip
+    ? waypoints.slice(1, -1)
+    : waypoints.slice(1);
 
-  // 1. Get optimized route from Google Directions
-  const route = await getDirections(
-    origin,
-    destination,
-    intermediates,
-    settings
-  );
+  const provider = getRoutingProvider();
+  const route = await provider.getRoute(origin, destination, intermediates, settings);
+  const { legs, waypointOrder, overviewPolyline } = route;
 
-  const { legs, waypoint_order, overview_polyline } = route;
-
-  // 2. Group legs into daily segments
   const dailyGroups = groupLegsIntoDays(legs, settings);
-
-  // 3. For each day, find nearby places and build a schedule.
-  //    Also insert rest days according to settings.
   const rawDayPlans: DayPlan[] = await Promise.all(
     dailyGroups.map(async (group, index) => {
       const dayLegs = group.legs;
@@ -279,38 +133,39 @@ export async function planTrip(
       // Parallel fetch of all place types
       const isLastDay = index === dailyGroups.length - 1;
 
-      const [gasStops, hotelSuggestions, attractions, restaurants] =
+      const [gasStops, hotelSuggestions, attractions, restaurants, evChargingStops, campgrounds] =
         await Promise.all([
           findGasStationsAlongDay(dayLegs, settings.fuelRangeKm),
-          isLastDay
-            ? Promise.resolve([])
-            : searchNearbyPlaces(
-                endLeg.end_location,
-                'lodging',
-                SEARCH_RADIUS.HOTEL,
-                5
-              ),
+          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'lodging', SEARCH_RADIUS.HOTEL, 5),
           findAttractions(dayLegs),
           findRestaurants(dayLegs),
+          findEvChargingAlongDay(dayLegs, settings.fuelRangeKm),
+          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'campground', SEARCH_RADIUS.CAMPGROUND, 3),
         ]);
 
-      const polylineSegments = dayLegs
-        .flatMap((leg) => leg.steps.map((s) => s.polyline.points));
+      const estimatedFuelCost =
+        Math.round(
+          (dayDistanceKm / 100) *
+            (settings.fuelEfficiencyLPer100km ?? 8.0) *
+            (settings.fuelPricePerLiter ?? 1.8) *
+            10
+        ) / 10;
 
-      // Build moveable segments (one per leg) for post-generation editing
+      const polylineSegments = dayLegs.flatMap((leg) => leg.steps.map((s: RouteStep) => s.encodedPolyline));
+
       const segments: DaySegment[] = dayLegs.map((leg) => ({
-        distanceKm: Math.round(leg.distance.value / 1000),
-        durationMinutes: Math.round(leg.duration.value / 60),
-        startName: leg.start_address,
-        startLocation: leg.start_location,
-        endName: leg.end_address,
-        endLocation: leg.end_location,
-        polylineSegments: leg.steps.map((s) => s.polyline.points),
+        distanceKm: Math.round(leg.distanceMeters / 1000),
+        durationMinutes: Math.round(leg.durationSeconds / 60),
+        startName: leg.startAddress,
+        startLocation: leg.startLocation,
+        endName: leg.endAddress,
+        endLocation: leg.endLocation,
+        polylineSegments: leg.steps.map((s: RouteStep) => s.encodedPolyline),
       }));
 
       const mainStops = dayLegs.slice(0, -1).map((leg) => ({
-        name: leg.end_address,
-        location: leg.end_location,
+        name: leg.endAddress,
+        location: leg.endLocation,
       }));
 
       // ── Build day schedule ──
@@ -330,8 +185,8 @@ export async function planTrip(
       const numSegments = dayLegs.length;
       for (let i = 0; i < numSegments; i++) {
         const leg = dayLegs[i];
-        const segDurationMin = Math.round(leg.duration.value / 60);
-        const segDistanceKm = Math.round(leg.distance.value / 1000);
+        const segDurationMin = Math.round(leg.durationSeconds / 60);
+        const segDistanceKm = Math.round(leg.distanceMeters / 1000);
         const startTime = cursor;
         cursor = addMinutesToTime(cursor, segDurationMin);
 
@@ -339,7 +194,7 @@ export async function planTrip(
           type: 'drive',
           time: startTime,
           endTime: cursor,
-          title: `Drive to ${leg.end_address.split(',')[0]} (${segDistanceKm} km)`,
+          title: `Drive to ${leg.endAddress.split(',')[0]} (${segDistanceKm} km)`,
           durationMinutes: segDurationMin,
           icon: '🚗',
         });
@@ -364,7 +219,7 @@ export async function planTrip(
             type: 'sightseeing',
             time: cursor,
             endTime: addMinutesToTime(cursor, seeTime),
-            title: `Explore ${leg.end_address.split(',')[0]}`,
+            title: `Explore ${leg.endAddress.split(',')[0]}`,
             durationMinutes: seeTime,
             icon: '🚶',
           });
@@ -390,9 +245,9 @@ export async function planTrip(
         schedule.push({
           type: 'arrive_home',
           time: cursor,
-          title: 'Arrive home 🎉',
+          title: settings.oneWayTrip ? 'Arrived at destination 🎉' : 'Arrive home 🎉',
           durationMinutes: 0,
-          icon: '🏠',
+          icon: settings.oneWayTrip ? '📍' : '🏠',
         });
       } else {
         // If we arrive before check-in time, add free time
@@ -407,7 +262,7 @@ export async function planTrip(
             type: 'sightseeing',
             time: cursor,
             endTime: settings.checkinTime,
-            title: `Explore ${endLeg.end_address.split(',')[0]}`,
+            title: `Explore ${endLeg.endAddress.split(',')[0]}`,
             durationMinutes: freeMin,
             icon: '🚶',
           });
@@ -428,12 +283,12 @@ export async function planTrip(
         date: '',
         isRestDay: false,
         startLocation: {
-          name: startLeg.start_address,
-          location: startLeg.start_location,
+          name: startLeg.startAddress,
+          location: startLeg.startLocation,
         },
         endLocation: {
-          name: endLeg.end_address,
-          location: endLeg.end_location,
+          name: endLeg.endAddress,
+          location: endLeg.endLocation,
         },
         mainStops,
         distanceKm: dayDistanceKm,
@@ -442,6 +297,9 @@ export async function planTrip(
         hotelSuggestions,
         attractions,
         restaurants,
+        evChargingStops,
+        campgrounds,
+        estimatedFuelCost,
         polylineSegments,
         schedule,
         segments,
@@ -449,7 +307,7 @@ export async function planTrip(
     })
   );
 
-  // 4. Insert rest days
+  // Insert rest days
   const dayPlans: DayPlan[] = [];
   let calendarDay = 0;
   let drivingDaysSinceRest = 0;
@@ -479,6 +337,9 @@ export async function planTrip(
         hotelSuggestions: prevDay.hotelSuggestions,
         attractions: prevDay.attractions,
         restaurants: prevDay.restaurants,
+        evChargingStops: [],
+        campgrounds: prevDay.campgrounds,
+        estimatedFuelCost: 0,
         polylineSegments: [],
         schedule: [
           { type: 'rest_day', time: '09:00', title: 'Sleep in & relax', durationMinutes: 0, icon: '😴' },
@@ -504,44 +365,43 @@ export async function planTrip(
     drivingDaysSinceRest++;
   }
 
-  // Calculate totals
   const totalDistanceKm = dayPlans.reduce((sum, d) => sum + d.distanceKm, 0);
   const totalDurationMinutes = dayPlans.reduce(
     (sum, d) => sum + d.durationMinutes,
     0
   );
+  const estimatedTotalFuelCost =
+    Math.round(
+      dayPlans.reduce((sum, d) => sum + (d.estimatedFuelCost ?? 0), 0) * 10
+    ) / 10;
 
   return {
     days: dayPlans,
     totalDistanceKm,
     totalDurationMinutes,
     totalDays: dayPlans.length,
-    waypointOrder: waypoint_order || [],
-    overviewPolyline: overview_polyline.points,
+    waypointOrder,
+    overviewPolyline,
     departureDate: settings.departureDate,
+    estimatedTotalFuelCost,
   };
 }
 
 // ─── Day Grouping ───────────────────────────────────────────────────────────
 
 interface DayGroup {
-  legs: DirectionsLeg[];
+  legs: RouteLeg[];
   distanceMeters: number;
   durationSeconds: number;
 }
 
-/**
- * Split a single Directions leg into multiple "virtual" legs by
- * grouping its steps so that each virtual leg stays within the
- * daily distance / duration limits.
- */
 function splitLegBySteps(
-  leg: DirectionsLeg,
+  leg: RouteLeg,
   maxDistanceMeters: number,
   maxDurationSeconds: number
-): DirectionsLeg[] {
-  const result: DirectionsLeg[] = [];
-  let steps: DirectionsLeg['steps'] = [];
+): RouteLeg[] {
+  const result: RouteLeg[] = [];
+  let steps: RouteStep[] = [];
   let dist = 0;
   let dur = 0;
 
@@ -550,12 +410,12 @@ function splitLegBySteps(
     const first = steps[0];
     const last = steps[steps.length - 1];
     result.push({
-      distance: { value: dist, text: `${Math.round(dist / 1000)} km` },
-      duration: { value: dur, text: `${Math.round(dur / 60)} mins` },
-      start_address: result.length === 0 ? leg.start_address : `Overnight stop`,
-      end_address: `Overnight stop`,
-      start_location: first.start_location,
-      end_location: last.end_location,
+      distanceMeters: dist,
+      durationSeconds: dur,
+      startAddress: result.length === 0 ? leg.startAddress : 'Overnight stop',
+      endAddress: 'Overnight stop',
+      startLocation: first.startLocation,
+      endLocation: last.endLocation,
       steps: [...steps],
     });
     steps = [];
@@ -564,29 +424,24 @@ function splitLegBySteps(
   };
 
   for (const step of leg.steps) {
-    const nextDist = dist + step.distance.value;
-    const nextDur = dur + step.duration.value;
-
-    if (steps.length > 0 && (nextDist > maxDistanceMeters || nextDur > maxDurationSeconds)) {
+    if (steps.length > 0 && (dist + step.distanceMeters > maxDistanceMeters || dur + step.durationSeconds > maxDurationSeconds)) {
       flush();
     }
-
     steps.push(step);
-    dist += step.distance.value;
-    dur += step.duration.value;
+    dist += step.distanceMeters;
+    dur += step.durationSeconds;
   }
 
-  // Flush remaining steps
   if (steps.length > 0) {
     const first = steps[0];
     const last = steps[steps.length - 1];
     result.push({
-      distance: { value: dist, text: `${Math.round(dist / 1000)} km` },
-      duration: { value: dur, text: `${Math.round(dur / 60)} mins` },
-      start_address: result.length === 0 ? leg.start_address : `Overnight stop`,
-      end_address: leg.end_address,
-      start_location: first.start_location,
-      end_location: last.end_location,
+      distanceMeters: dist,
+      durationSeconds: dur,
+      startAddress: result.length === 0 ? leg.startAddress : 'Overnight stop',
+      endAddress: leg.endAddress,
+      startLocation: first.startLocation,
+      endLocation: last.endLocation,
       steps: [...steps],
     });
   }
@@ -594,140 +449,84 @@ function splitLegBySteps(
   return result;
 }
 
-function groupLegsIntoDays(
-  legs: DirectionsLeg[],
-  settings: TripSettings
-): DayGroup[] {
+function groupLegsIntoDays(legs: RouteLeg[], settings: TripSettings): DayGroup[] {
   const maxDistanceMeters = settings.maxDistancePerDayKm * 1000;
   const maxDurationSeconds = settings.maxDrivingMinutesPerDay * 60;
 
-  // First, expand legs that are individually longer than the daily limit
-  const expandedLegs: DirectionsLeg[] = [];
+  const expandedLegs: RouteLeg[] = [];
   for (const leg of legs) {
-    if (leg.distance.value > maxDistanceMeters || leg.duration.value > maxDurationSeconds) {
+    if (leg.distanceMeters > maxDistanceMeters || leg.durationSeconds > maxDurationSeconds) {
       expandedLegs.push(...splitLegBySteps(leg, maxDistanceMeters, maxDurationSeconds));
     } else {
       expandedLegs.push(leg);
     }
   }
 
-  // Now group the (possibly split) legs into days
   const groups: DayGroup[] = [];
   let current: DayGroup = { legs: [], distanceMeters: 0, durationSeconds: 0 };
 
   for (const leg of expandedLegs) {
-    const newDistance = current.distanceMeters + leg.distance.value;
-    const newDuration = current.durationSeconds + leg.duration.value;
-
-    // If adding this leg would exceed daily limits and we already have legs,
-    // start a new day
-    if (
-      current.legs.length > 0 &&
-      (newDistance > maxDistanceMeters || newDuration > maxDurationSeconds)
-    ) {
+    const newDist = current.distanceMeters + leg.distanceMeters;
+    const newDur = current.durationSeconds + leg.durationSeconds;
+    if (current.legs.length > 0 && (newDist > maxDistanceMeters || newDur > maxDurationSeconds)) {
       groups.push(current);
-      current = {
-        legs: [leg],
-        distanceMeters: leg.distance.value,
-        durationSeconds: leg.duration.value,
-      };
+      current = { legs: [leg], distanceMeters: leg.distanceMeters, durationSeconds: leg.durationSeconds };
     } else {
       current.legs.push(leg);
-      current.distanceMeters = newDistance;
-      current.durationSeconds = newDuration;
+      current.distanceMeters = newDist;
+      current.durationSeconds = newDur;
     }
   }
 
-  // Push the last day
-  if (current.legs.length > 0) {
-    groups.push(current);
-  }
-
+  if (current.legs.length > 0) groups.push(current);
   return groups;
 }
 
 // ─── Place Finders ──────────────────────────────────────────────────────────
 
-async function findGasStationsAlongDay(
-  legs: DirectionsLeg[],
-  fuelRangeKm: number
-): Promise<Place[]> {
-  const refuelIntervalKm = fuelRangeKm * FUEL_BUFFER_FACTOR;
-  const totalDistanceKm =
-    legs.reduce((sum, l) => sum + l.distance.value, 0) / 1000;
-
-  // Only search for gas if the day's distance is significant
-  if (totalDistanceKm < refuelIntervalKm * 0.5) return [];
-
-  const samplePoints = samplePointsAlongLegs(legs, refuelIntervalKm);
-
-  if (samplePoints.length === 0 && totalDistanceKm > refuelIntervalKm * 0.8) {
-    // Search at midpoint
-    const midpoint = getMidpointOfLegs(legs);
-    samplePoints.push(midpoint);
-  }
-
-  const allStations: Place[] = [];
-  const seenIds = new Set<string>();
-
+async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number): Promise<Place[]> {
+  const intervalKm = fuelRangeKm * FUEL_BUFFER_FACTOR;
+  const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
+  if (totalKm < intervalKm * 0.5) return [];
+  const samplePoints = samplePointsAlongLegs(legs, intervalKm);
+  if (samplePoints.length === 0 && totalKm > intervalKm * 0.8) samplePoints.push(getMidpointOfLegs(legs));
+  const seen = new Set<string>();
+  const results: Place[] = [];
   for (const point of samplePoints.slice(0, 3)) {
-    // Limit API calls
-    const stations = await searchNearbyPlaces(
-      point,
-      'gas_station',
-      SEARCH_RADIUS.GAS_STATION,
-      2
-    );
-    for (const station of stations) {
-      if (!seenIds.has(station.id)) {
-        seenIds.add(station.id);
-        allStations.push(station);
-      }
-    }
+    const stations = await findNearby(point, 'gas_station', SEARCH_RADIUS.GAS_STATION, 2);
+    for (const s of stations) { if (!seen.has(s.id)) { seen.add(s.id); results.push(s); } }
   }
-
-  return allStations;
+  return results;
 }
 
-async function findAttractions(legs: DirectionsLeg[]): Promise<Place[]> {
-  // Search at midpoint and near the interesting stops
+async function findAttractions(legs: RouteLeg[]): Promise<Place[]> {
   const midpoint = getMidpointOfLegs(legs);
-  const attractions = await searchNearbyPlaces(
-    midpoint,
-    'tourist_attraction',
-    SEARCH_RADIUS.ATTRACTION,
-    5
-  );
-
-  // Also search near end point if it's different enough
+  const attractions = await findNearby(midpoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 5);
   if (legs.length > 1) {
-    const endPoint = legs[legs.length - 1].end_location;
-    const endAttractions = await searchNearbyPlaces(
-      endPoint,
-      'tourist_attraction',
-      SEARCH_RADIUS.ATTRACTION,
-      3
-    );
-
-    const seenIds = new Set(attractions.map((a) => a.id));
-    for (const attr of endAttractions) {
-      if (!seenIds.has(attr.id)) {
-        attractions.push(attr);
-      }
-    }
+    const endPoint = legs[legs.length - 1].endLocation;
+    const endAttractions = await findNearby(endPoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 3);
+    const seen = new Set(attractions.map((a) => a.id));
+    for (const attr of endAttractions) { if (!seen.has(attr.id)) attractions.push(attr); }
   }
-
   return attractions.slice(0, 6);
 }
 
-async function findRestaurants(legs: DirectionsLeg[]): Promise<Place[]> {
-  const midpoint = getMidpointOfLegs(legs);
-  const restaurants = await searchNearbyPlaces(
-    midpoint,
-    'restaurant',
-    SEARCH_RADIUS.RESTAURANT,
-    4
-  );
-
-  return restaurants;
+async function findRestaurants(legs: RouteLeg[]): Promise<Place[]> {
+  return findNearby(getMidpointOfLegs(legs), 'restaurant', SEARCH_RADIUS.RESTAURANT, 4);
 }
+
+async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number): Promise<Place[]> {
+  const intervalKm = fuelRangeKm * FUEL_BUFFER_FACTOR;
+  const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
+  if (totalKm < intervalKm * 0.5) return [];
+  let samplePoints = samplePointsAlongLegs(legs, intervalKm);
+  if (samplePoints.length === 0) samplePoints = [getMidpointOfLegs(legs)];
+  const seen = new Set<string>();
+  const results: Place[] = [];
+  for (const point of samplePoints.slice(0, 3)) {
+    const stations = await findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2);
+    for (const s of stations) { if (!seen.has(s.id)) { seen.add(s.id); results.push(s); } }
+  }
+  return results;
+}
+

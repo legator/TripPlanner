@@ -1,14 +1,21 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { GoogleMapsProvider } from '@/components/GoogleMapsProvider';
 import MapView from '@/components/MapView';
+import { HereMapsProvider } from '@/components/HereMapsProvider';
+import HereMapView from '@/components/HereMapView';
+import MapProviderPicker, { getStoredMapProvider, storeMapProvider, MapProviderChoice } from '@/components/MapProviderPicker';
 import Sidebar from '@/components/Sidebar';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { Waypoint, TripPlan, TripSettings } from '@/lib/types';
 import { DEFAULT_SETTINGS } from '@/lib/constants';
 import { toggleRestDay, setDayEndAtSegment, applyUserEdits, applyOptimizedSegments, emptyUserEdits } from '@/lib/tripPlanEditor';
 import { optimizeDayRoute } from '@/lib/tripOptimization';
+import { saveTripToStorage, loadTripFromStorage, clearTripFromStorage } from '@/lib/tripStorage';
+import { decodeTripFromURL, loadTripFromShareParam } from '@/lib/tripShare';
 import type { UserEdits } from '@/lib/tripPlanEditor';
+import type { SavedTrip } from '@/lib/savedTrips';
 
 export default function Home() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
@@ -17,11 +24,62 @@ export default function Home() {
   const [isPlanning, setIsPlanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  // null = not yet determined (loading from localStorage), undefined = show picker
+  const [mapProvider, setMapProvider] = useState<MapProviderChoice | null | undefined>(null);
 
   // Accumulated waypoints used for the active plan (includes search-added stops)
   const planWaypointsRef = useRef<Waypoint[]>([]);
   // Track user edits (rest days, day-end choices) so they survive re-plans
   const userEditsRef = useRef<UserEdits>(emptyUserEdits());
+
+  // On mount: restore from URL hash first, then localStorage
+  useEffect(() => {
+    const init = async () => {
+    // Resolve map provider once and reuse below
+    const storedProvider = getStoredMapProvider();
+    const envProvider = process.env.NEXT_PUBLIC_MAP_PROVIDER as MapProviderChoice | undefined;
+    const resolvedProvider = storedProvider ?? envProvider ?? undefined;
+
+    // Check ?share=id param first (KV short link)
+    const fromShare = await loadTripFromShareParam();
+    if (fromShare) {
+      setWaypoints(fromShare.waypoints);
+      setSettings(fromShare.settings);
+      setTripPlan(fromShare.tripPlan);
+      planWaypointsRef.current = [...fromShare.waypoints];
+      setMapProvider(resolvedProvider);
+      return;
+    }
+
+    const fromURL = decodeTripFromURL();
+    if (fromURL) {
+      setWaypoints(fromURL.waypoints);
+      setSettings(fromURL.settings);
+      setTripPlan(fromURL.tripPlan);
+      planWaypointsRef.current = [...fromURL.waypoints];
+      // Clear the hash so bookmarking the current URL doesn't re-load stale data
+      history.replaceState(null, '', window.location.pathname);
+      setMapProvider(resolvedProvider);
+      return;
+    }
+
+    const saved = loadTripFromStorage();
+    if (saved) {
+      setWaypoints(saved.waypoints);
+      setSettings(saved.settings);
+      if (saved.tripPlan) setTripPlan(saved.tripPlan);
+      planWaypointsRef.current = [...saved.waypoints];
+    }
+
+    setMapProvider(resolvedProvider);
+    }; // end init
+    init();
+  }, []);
+
+  // Auto-save whenever waypoints, settings, or tripPlan changes
+  useEffect(() => {
+    saveTripToStorage(waypoints, settings, tripPlan);
+  }, [waypoints, settings, tripPlan]);
 
   const handlePlanTrip = useCallback(async () => {
     if (waypoints.length < 2) {
@@ -65,6 +123,7 @@ export default function Home() {
     setError(null);
     planWaypointsRef.current = [];
     userEditsRef.current = emptyUserEdits();
+    clearTripFromStorage();
   }, []);
 
   const handleToggleRestDay = useCallback((dayIndex: number) => {
@@ -155,32 +214,85 @@ export default function Home() {
     }
   }, [settings]);
 
+  const addWaypoint = (wp: Waypoint) => setWaypoints((prev) => [...prev, wp]);
+
+  const handleLoadSavedTrip = useCallback((trip: SavedTrip) => {
+    setWaypoints(trip.waypoints);
+    setSettings(trip.settings);
+    setTripPlan(trip.tripPlan);
+    setSelectedDay(null);
+    planWaypointsRef.current = [...trip.waypoints];
+    userEditsRef.current = emptyUserEdits();
+  }, []);
+
+  const sidebarEl = (
+    <ErrorBoundary>
+      <Sidebar
+        waypoints={waypoints}
+        onWaypointsChange={setWaypoints}
+        settings={settings}
+        onSettingsChange={setSettings}
+        tripPlan={tripPlan}
+        onPlanTrip={handlePlanTrip}
+        onReset={handleReset}
+        isPlanning={isPlanning}
+        error={error}
+        selectedDay={selectedDay}
+        onSelectDay={setSelectedDay}
+        onToggleRestDay={handleToggleRestDay}
+        onSetDayEnd={handleSetDayEnd}
+        onAddOvernightStop={handleAddOvernightStop}
+        onOptimizeRoute={handleOptimizeRoute}
+        mapProvider={mapProvider ?? undefined}
+        onChangeMapProvider={() => setMapProvider(undefined)}
+        onLoadSavedTrip={handleLoadSavedTrip}
+      />
+    </ErrorBoundary>
+  );
+
+  const handlePickProvider = (provider: MapProviderChoice) => {
+    storeMapProvider(provider);
+    setMapProvider(provider);
+  };
+
+  // Still loading from localStorage — render nothing to avoid flicker
+  if (mapProvider === null) return null;
+
+  // No choice made yet — show the picker overlay
+  if (mapProvider === undefined) {
+    return <MapProviderPicker onSelect={handlePickProvider} />;
+  }
+
+  if (mapProvider === 'here') {
+    return (
+      <HereMapsProvider>
+        <div className="flex h-screen w-screen overflow-hidden bg-gray-100">
+          {sidebarEl}
+          <ErrorBoundary>
+            <HereMapView
+              waypoints={waypoints}
+              tripPlan={tripPlan}
+              selectedDay={selectedDay}
+              onAddWaypoint={addWaypoint}
+            />
+          </ErrorBoundary>
+        </div>
+      </HereMapsProvider>
+    );
+  }
+
   return (
     <GoogleMapsProvider>
       <div className="flex h-screen w-screen overflow-hidden bg-gray-100">
-        <Sidebar
-          waypoints={waypoints}
-          onWaypointsChange={setWaypoints}
-          settings={settings}
-          onSettingsChange={setSettings}
-          tripPlan={tripPlan}
-          onPlanTrip={handlePlanTrip}
-          onReset={handleReset}
-          isPlanning={isPlanning}
-          error={error}
-          selectedDay={selectedDay}
-          onSelectDay={setSelectedDay}
-          onToggleRestDay={handleToggleRestDay}
-          onSetDayEnd={handleSetDayEnd}
-          onAddOvernightStop={handleAddOvernightStop}
-          onOptimizeRoute={handleOptimizeRoute}
-        />
-        <MapView
-          waypoints={waypoints}
-          tripPlan={tripPlan}
-          selectedDay={selectedDay}
-          onAddWaypoint={(wp) => setWaypoints((prev) => [...prev, wp])}
-        />
+        {sidebarEl}
+        <ErrorBoundary>
+          <MapView
+            waypoints={waypoints}
+            tripPlan={tripPlan}
+            selectedDay={selectedDay}
+            onAddWaypoint={addWaypoint}
+          />
+        </ErrorBoundary>
       </div>
     </GoogleMapsProvider>
   );
