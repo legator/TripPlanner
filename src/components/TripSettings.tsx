@@ -317,7 +317,7 @@ export default function TripSettingsPanel({
       {/* Traffic-aware routing */}
       <div className="flex items-center justify-between py-2">
         <div>
-          <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
+          <p id="traffic-aware-label" className="text-xs font-medium text-gray-600 dark:text-gray-300">
             Traffic-aware ETAs
           </p>
           <p className="text-xs text-gray-400 dark:text-gray-500">
@@ -328,6 +328,7 @@ export default function TripSettingsPanel({
           type="button"
           role="switch"
           aria-checked={settings.useTrafficData ?? true}
+          aria-labelledby="traffic-aware-label"
           onClick={() => update({ useTrafficData: !(settings.useTrafficData ?? true) })}
           disabled={disabled}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 ${

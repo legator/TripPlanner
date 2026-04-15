@@ -7,11 +7,13 @@ import { Waypoint } from '@/lib/types';
 interface PlaceAutocompleteProps {
   onPlaceSelect: (waypoint: Waypoint) => void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
 export default function PlaceAutocomplete({
   onPlaceSelect,
   disabled = false,
+  placeholder = 'Search for a place...',
 }: PlaceAutocompleteProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const elementCreatedRef = useRef(false);
@@ -74,6 +76,14 @@ export default function PlaceAutocomplete({
 
     containerRef.current.appendChild(placeAutocomplete as unknown as Node);
 
+    // If the web component provides an internal input, set its placeholder for clarity
+    try {
+      const inputEl = (placeAutocomplete as unknown as HTMLElement).querySelector?.('input');
+      if (inputEl && 'placeholder' in inputEl) {
+        (inputEl as HTMLInputElement).placeholder = placeholder;
+      }
+    } catch {}
+
     const container = containerRef.current;
     return () => {
       if (container) {
@@ -87,7 +97,7 @@ export default function PlaceAutocomplete({
     return (
       <input
         type="text"
-        placeholder="Loading..."
+        placeholder={placeholder}
         disabled
         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg
                    bg-gray-100 cursor-not-allowed placeholder:text-gray-400"

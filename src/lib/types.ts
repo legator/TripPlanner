@@ -142,4 +142,9 @@ export interface PlanTripRequest {
   settings: TripSettings;
 }
 
+// Optional provider field allows the client to request a specific routing provider
+export interface PlanTripRequestWithProvider extends PlanTripRequest {
+  provider?: 'google' | 'here';
+}
+
 export type ActiveView = 'input' | 'plan';

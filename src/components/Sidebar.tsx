@@ -174,6 +174,9 @@ export default function Sidebar({
               onRemove={removeWaypoint}
               onReorder={reorderWaypoints}
               disabled={isPlanning}
+              oneWayTrip={settings.oneWayTrip}
+              supportsOptimization={mapProvider === 'google'}
+              currentMapProvider={mapProvider ?? undefined}
             />
 
             {/* Settings toggle */}
@@ -248,7 +251,8 @@ export default function Sidebar({
             onToggleRestDay={onToggleRestDay}
             onSetDayEnd={onSetDayEnd}
             onAddOvernightStop={onAddOvernightStop}
-            onOptimizeRoute={onOptimizeRoute}
+            // Only enable optimize when using Google provider
+            onOptimizeRoute={mapProvider === 'google' ? onOptimizeRoute : undefined}
             isPlanning={isPlanning}
             maxDistanceKm={settings.maxDistancePerDayKm}
             maxDrivingMinutes={settings.maxDrivingMinutesPerDay}

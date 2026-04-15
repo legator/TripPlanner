@@ -183,6 +183,7 @@ export const googleProvider: RoutingProvider = {
         currentOpeningHours?: { openNow?: boolean };
         photos?: Array<{ name?: string }>;
       }
+      const publicKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
       return (data.places || []).map((place: GPlace): NearbyPlace => ({
         id: place.id || '',
         name: place.displayName?.text || 'Unknown',
@@ -195,8 +196,9 @@ export const googleProvider: RoutingProvider = {
         rating: place.rating,
         priceLevel: mapPriceLevel(place.priceLevel),
         isOpen: place.currentOpeningHours?.openNow,
-        photoUrl: place.photos?.[0]?.name
-          ? `https://places.googleapis.com/v1/${place.photos[0].name}/media?maxWidthPx=200&key=${API_KEY}`
+        // Only include a client-usable photo URL if a browser-restricted key is available.
+        photoUrl: place.photos?.[0]?.name && publicKey
+          ? `https://places.googleapis.com/v1/${place.photos[0].name}/media?maxWidthPx=200&key=${publicKey}`
           : undefined,
       }));
     } catch {

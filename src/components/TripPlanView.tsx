@@ -37,6 +37,21 @@ export default function TripPlanView({
     return `${hours}h ${mins}m`;
   };
 
+  const formatCurrency = (value: number) => {
+    if (typeof window !== 'undefined') {
+      try {
+        return new Intl.NumberFormat(navigator.language || undefined, {
+          style: 'currency',
+          currency: 'EUR',
+          maximumFractionDigits: 0,
+        }).format(value);
+      } catch {
+        return `${Math.round(value).toLocaleString()} €`;
+      }
+    }
+    return `${Math.round(value)} €`;
+  };
+
   const restDays = tripPlan.days.filter((d) => d.isRestDay).length;
   const drivingDays = tripPlan.totalDays - restDays;
 
@@ -82,7 +97,7 @@ export default function TripPlanView({
         {tripPlan.estimatedTotalFuelCost != null && tripPlan.estimatedTotalFuelCost > 0 && (
           <div className="col-span-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2.5 text-center">
             <p className="text-lg font-bold text-amber-700 dark:text-amber-300">
-              ~{tripPlan.estimatedTotalFuelCost.toFixed(0)} {typeof window !== 'undefined' && Intl.NumberFormat().resolvedOptions().currency ? '' : ''}€
+              ~{formatCurrency(tripPlan.estimatedTotalFuelCost)}
             </p>
             <p className="text-xs text-amber-500 dark:text-amber-400">Estimated fuel cost</p>
           </div>

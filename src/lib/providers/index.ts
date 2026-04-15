@@ -9,8 +9,9 @@ export function getMapProviderName(): MapProviderName {
   return val === 'here' ? 'here' : 'google';
 }
 
-export function getRoutingProvider(): RoutingProvider {
-  return getMapProviderName() === 'here' ? hereProvider : googleProvider;
+export function getRoutingProvider(preferred?: MapProviderName): RoutingProvider {
+  const name = preferred ?? getMapProviderName();
+  return name === 'here' ? hereProvider : googleProvider;
 }
 
 export type { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';

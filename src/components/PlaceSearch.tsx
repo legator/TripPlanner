@@ -3,18 +3,17 @@
 import { Waypoint } from '@/lib/types';
 import PlaceAutocomplete from './PlaceAutocomplete';
 import HerePlaceAutocomplete from './HerePlaceAutocomplete';
+import type { MapProviderChoice } from './MapProviderPicker';
 
 interface PlaceSearchProps {
   onPlaceSelect: (waypoint: Waypoint) => void;
   placeholder?: string;
   disabled?: boolean;
+  currentMapProvider?: MapProviderChoice | null;
 }
 
-const MAP_PROVIDER = process.env.NEXT_PUBLIC_MAP_PROVIDER;
-
 export default function PlaceSearch(props: PlaceSearchProps) {
-  if (MAP_PROVIDER === 'here') {
-    return <HerePlaceAutocomplete {...props} />;
-  }
+  const provider = props.currentMapProvider ?? process.env.NEXT_PUBLIC_MAP_PROVIDER;
+  if (provider === 'here') return <HerePlaceAutocomplete {...props} />;
   return <PlaceAutocomplete {...props} />;
 }

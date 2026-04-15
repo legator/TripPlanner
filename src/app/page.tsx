@@ -97,7 +97,7 @@ export default function Home() {
       const response = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waypoints, settings }),
+        body: JSON.stringify({ waypoints, settings, provider: mapProvider }),
       });
 
       const data = await response.json();
@@ -150,7 +150,15 @@ export default function Home() {
   const handleSetDayEnd = useCallback((dayIndex: number, segmentCount: number) => {
     setTripPlan((prev) =>
       prev
-        ? setDayEndAtSegment(prev, dayIndex, segmentCount, settings.checkoutTime, settings.checkinTime)
+        ? setDayEndAtSegment(
+            prev,
+            dayIndex,
+            segmentCount,
+            settings.checkoutTime,
+            settings.checkinTime,
+            settings.fuelPricePerLiter,
+            settings.fuelEfficiencyLPer100km
+          )
         : prev
     );
   }, [settings.checkoutTime, settings.checkinTime]);
@@ -167,7 +175,15 @@ export default function Home() {
 
       setTripPlan((prev) =>
         prev
-          ? applyOptimizedSegments(prev, dayIndex, optimizedSegments, settings.checkoutTime, settings.checkinTime)
+          ? applyOptimizedSegments(
+              prev,
+              dayIndex,
+              optimizedSegments,
+              settings.checkoutTime,
+              settings.checkinTime,
+              settings.fuelPricePerLiter,
+              settings.fuelEfficiencyLPer100km
+            )
           : prev
       );
     } catch (err) {
@@ -193,7 +209,7 @@ export default function Home() {
       const response = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waypoints: currentPlanWaypoints, settings }),
+        body: JSON.stringify({ waypoints: currentPlanWaypoints, settings, provider: mapProvider }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to re-plan trip');

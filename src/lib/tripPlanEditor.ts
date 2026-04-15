@@ -30,7 +30,13 @@ function addMinutesToTime(time: string, minutes: number): string {
 }
 
 /** Rebuild a driving day's computed fields from its segments array. */
-function rebuildDayFromSegments(day: DayPlan, checkoutTime: string, checkinTime: string): DayPlan {
+function rebuildDayFromSegments(
+  day: DayPlan,
+  checkoutTime: string,
+  checkinTime: string,
+  fuelPricePerLiter?: number,
+  fuelEfficiencyLPer100km?: number
+): DayPlan {
   const segs = day.segments;
   if (segs.length === 0) return day; // rest day or empty
 
@@ -91,6 +97,8 @@ function rebuildDayFromSegments(day: DayPlan, checkoutTime: string, checkinTime:
     durationMinutes: 0, icon: '🏨',
   });
 
+  const estimatedFuelCost = Math.round((distanceKm / 100) * (fuelEfficiencyLPer100km ?? 8.0) * (fuelPricePerLiter ?? 1.8) * 10) / 10;
+
   return {
     ...day,
     distanceKm,
@@ -100,6 +108,7 @@ function rebuildDayFromSegments(day: DayPlan, checkoutTime: string, checkinTime:
     endLocation,
     mainStops,
     schedule,
+    estimatedFuelCost,
   };
 }
 
@@ -113,12 +122,14 @@ function renumberDays(plan: TripPlan): TripPlan {
 
   const totalDistanceKm = days.reduce((s, d) => s + d.distanceKm, 0);
   const totalDurationMinutes = days.reduce((s, d) => s + d.durationMinutes, 0);
+  const estimatedTotalFuelCost = Math.round(days.reduce((s, d) => s + (d.estimatedFuelCost ?? 0), 0) * 10) / 10;
 
   return {
     ...plan,
     days,
     totalDistanceKm,
     totalDurationMinutes,
+    estimatedTotalFuelCost,
     totalDays: days.length,
   };
 }
@@ -178,7 +189,9 @@ export function setDayEndAtSegment(
   dayIndex: number,
   newSegmentCount: number,
   checkoutTime: string,
-  checkinTime: string
+  checkinTime: string,
+  fuelPricePerLiter?: number,
+  fuelEfficiencyLPer100km?: number
 ): TripPlan {
   const days = [...plan.days.map((d) => ({ ...d, segments: [...d.segments] }))];
   const thisDay = days[dayIndex];
@@ -219,17 +232,17 @@ export function setDayEndAtSegment(
 
   // Update this day
   days[dayIndex].segments = thisDaySegments;
-  days[dayIndex] = rebuildDayFromSegments(days[dayIndex], checkoutTime, checkinTime);
+  days[dayIndex] = rebuildDayFromSegments(days[dayIndex], checkoutTime, checkinTime, fuelPricePerLiter, fuelEfficiencyLPer100km);
 
   if (nextDrivingIdx !== -1) {
-    if (remainingSegments.length === 0) {
+      if (remainingSegments.length === 0) {
       // Next driving day is now empty — remove it.
       // Also remove any orphaned rest days between this day and the next driving day.
       const removeCount = nextDrivingIdx - dayIndex; // includes rest days in between + the next driving day
       days.splice(dayIndex + 1, removeCount);
     } else {
       days[nextDrivingIdx].segments = remainingSegments;
-      days[nextDrivingIdx] = rebuildDayFromSegments(days[nextDrivingIdx], checkoutTime, checkinTime);
+      days[nextDrivingIdx] = rebuildDayFromSegments(days[nextDrivingIdx], checkoutTime, checkinTime, fuelPricePerLiter, fuelEfficiencyLPer100km);
     }
   } else if (remainingSegments.length > 0) {
     // No next driving day existed — create one for the overflow
@@ -258,7 +271,7 @@ export function setDayEndAtSegment(
     // Insert after any rest days following this day
     let insertIdx = dayIndex + 1;
     while (insertIdx < days.length && days[insertIdx].isRestDay) insertIdx++;
-    days.splice(insertIdx, 0, rebuildDayFromSegments(newDay, checkoutTime, checkinTime));
+    days.splice(insertIdx, 0, rebuildDayFromSegments(newDay, checkoutTime, checkinTime, fuelPricePerLiter, fuelEfficiencyLPer100km));
   }
 
   return renumberDays({ ...plan, days });
@@ -308,7 +321,9 @@ export function applyOptimizedSegments(
   dayIndex: number,
   optimizedSegments: DaySegment[],
   checkoutTime: string,
-  checkinTime: string
+  checkinTime: string,
+  fuelPricePerLiter?: number,
+  fuelEfficiencyLPer100km?: number
 ): TripPlan {
   const days = [...plan.days.map((d) => ({ ...d, segments: [...d.segments] }))];
   const day = days[dayIndex];
@@ -321,7 +336,7 @@ export function applyOptimizedSegments(
 
   // Replace segments and rebuild the day
   days[dayIndex].segments = optimizedSegments;
-  days[dayIndex] = rebuildDayFromSegments(days[dayIndex], checkoutTime, checkinTime);
+  days[dayIndex] = rebuildDayFromSegments(days[dayIndex], checkoutTime, checkinTime, fuelPricePerLiter, fuelEfficiencyLPer100km);
 
   return renumberDays({ ...plan, days });
 }

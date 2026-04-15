@@ -1,7 +1,7 @@
 import { Place, PlaceType, DayPlan, DaySegment, TripPlan, Waypoint, TripSettings, ScheduleEvent } from './types';
 import { FUEL_BUFFER_FACTOR, SEARCH_RADIUS } from './constants';
 import { addDays, format } from 'date-fns';
-import { getRoutingProvider, RouteLeg, RouteStep, NearbyPlace } from './providers';
+import { getRoutingProvider, RouteLeg, RouteStep, NearbyPlace, MapProviderName } from './providers';
 
 // ─── Time helpers ───────────────────────────────────────────────────────────
 
@@ -48,8 +48,9 @@ async function findNearby(
   type: string,
   radius: number,
   maxResults = 5
+  , preferred?: MapProviderName
 ): Promise<Place[]> {
-  const provider = getRoutingProvider();
+  const provider = getRoutingProvider(preferred);
   const results = await provider.searchNearby(location, type, radius, maxResults);
   return results.map(toPlace);
 }
@@ -98,7 +99,8 @@ function getMidpointOfLegs(legs: RouteLeg[]): { lat: number; lng: number } {
 
 export async function planTrip(
   waypoints: Waypoint[],
-  settings: TripSettings
+  settings: TripSettings,
+  preferredProvider?: MapProviderName
 ): Promise<TripPlan> {
   if (waypoints.length < 2) {
     throw new Error('Add at least 2 places — a starting point and at least one destination.');
@@ -116,7 +118,7 @@ export async function planTrip(
     ? waypoints.slice(1, -1)
     : waypoints.slice(1);
 
-  const provider = getRoutingProvider();
+  const provider = getRoutingProvider(preferredProvider);
   const route = await provider.getRoute(origin, destination, intermediates, settings);
   const { legs, waypointOrder, overviewPolyline } = route;
 
@@ -135,12 +137,12 @@ export async function planTrip(
 
       const [gasStops, hotelSuggestions, attractions, restaurants, evChargingStops, campgrounds] =
         await Promise.all([
-          findGasStationsAlongDay(dayLegs, settings.fuelRangeKm),
-          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'lodging', SEARCH_RADIUS.HOTEL, 5),
-          findAttractions(dayLegs),
-          findRestaurants(dayLegs),
-          findEvChargingAlongDay(dayLegs, settings.fuelRangeKm),
-          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'campground', SEARCH_RADIUS.CAMPGROUND, 3),
+          findGasStationsAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider),
+          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'lodging', SEARCH_RADIUS.HOTEL, 5, preferredProvider),
+          findAttractions(dayLegs, preferredProvider),
+          findRestaurants(dayLegs, preferredProvider),
+          findEvChargingAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider),
+          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'campground', SEARCH_RADIUS.CAMPGROUND, 3, preferredProvider),
         ]);
 
       const estimatedFuelCost =
@@ -484,7 +486,7 @@ function groupLegsIntoDays(legs: RouteLeg[], settings: TripSettings): DayGroup[]
 
 // ─── Place Finders ──────────────────────────────────────────────────────────
 
-async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number): Promise<Place[]> {
+async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number, preferred?: MapProviderName): Promise<Place[]> {
   const intervalKm = fuelRangeKm * FUEL_BUFFER_FACTOR;
   const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
   if (totalKm < intervalKm * 0.5) return [];
@@ -493,29 +495,29 @@ async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number): P
   const seen = new Set<string>();
   const results: Place[] = [];
   for (const point of samplePoints.slice(0, 3)) {
-    const stations = await findNearby(point, 'gas_station', SEARCH_RADIUS.GAS_STATION, 2);
+    const stations = await findNearby(point, 'gas_station', SEARCH_RADIUS.GAS_STATION, 2, preferred);
     for (const s of stations) { if (!seen.has(s.id)) { seen.add(s.id); results.push(s); } }
   }
   return results;
 }
 
-async function findAttractions(legs: RouteLeg[]): Promise<Place[]> {
+async function findAttractions(legs: RouteLeg[], preferred?: MapProviderName): Promise<Place[]> {
   const midpoint = getMidpointOfLegs(legs);
-  const attractions = await findNearby(midpoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 5);
+  const attractions = await findNearby(midpoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 5, preferred);
   if (legs.length > 1) {
     const endPoint = legs[legs.length - 1].endLocation;
-    const endAttractions = await findNearby(endPoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 3);
+    const endAttractions = await findNearby(endPoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 3, preferred);
     const seen = new Set(attractions.map((a) => a.id));
     for (const attr of endAttractions) { if (!seen.has(attr.id)) attractions.push(attr); }
   }
   return attractions.slice(0, 6);
 }
 
-async function findRestaurants(legs: RouteLeg[]): Promise<Place[]> {
-  return findNearby(getMidpointOfLegs(legs), 'restaurant', SEARCH_RADIUS.RESTAURANT, 4);
+async function findRestaurants(legs: RouteLeg[], preferred?: MapProviderName): Promise<Place[]> {
+  return findNearby(getMidpointOfLegs(legs), 'restaurant', SEARCH_RADIUS.RESTAURANT, 4, preferred);
 }
 
-async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number): Promise<Place[]> {
+async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number, preferred?: MapProviderName): Promise<Place[]> {
   const intervalKm = fuelRangeKm * FUEL_BUFFER_FACTOR;
   const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
   if (totalKm < intervalKm * 0.5) return [];
@@ -524,7 +526,7 @@ async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number): Pr
   const seen = new Set<string>();
   const results: Place[] = [];
   for (const point of samplePoints.slice(0, 3)) {
-    const stations = await findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2);
+    const stations = await findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2, preferred);
     for (const s of stations) { if (!seen.has(s.id)) { seen.add(s.id); results.push(s); } }
   }
   return results;

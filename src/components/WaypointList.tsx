@@ -2,6 +2,7 @@
 
 import { Waypoint } from '@/lib/types';
 import PlaceSearch from './PlaceSearch';
+import type { MapProviderChoice } from './MapProviderPicker';
 
 interface WaypointListProps {
   waypoints: Waypoint[];
@@ -9,6 +10,9 @@ interface WaypointListProps {
   onRemove: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   disabled?: boolean;
+  oneWayTrip?: boolean;
+  supportsOptimization?: boolean;
+  currentMapProvider?: MapProviderChoice;
 }
 
 export default function WaypointList({
@@ -17,6 +21,9 @@ export default function WaypointList({
   onRemove,
   onReorder,
   disabled = false,
+  oneWayTrip = false,
+  supportsOptimization = false,
+  currentMapProvider,
 }: WaypointListProps) {
   const moveUp = (index: number) => {
     if (index > 1) onReorder(index, index - 1); // Don't move above origin
@@ -113,15 +120,21 @@ export default function WaypointList({
               : '📍 Add a destination to visit...'
           }
           disabled={disabled}
+          currentMapProvider={currentMapProvider}
         />
       </div>
 
-      {waypoints.length >= 1 && (
-        <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-          📍 Route: {waypoints[0]?.name} → {waypoints.slice(1).map(w => w.name).join(' → ')}{waypoints.length > 1 ? ` → ${waypoints[0]?.name}` : ''}
-          {' '}(order will be optimised)
-        </p>
-      )}
+      {waypoints.length >= 1 && (() => {
+        const origin = waypoints[0]?.name;
+        const dests = waypoints.slice(1).map((w) => w.name).join(' → ');
+        const roundTrip = !oneWayTrip && waypoints.length > 1 ? ` → ${origin}` : '';
+        const optimizationNote = supportsOptimization ? ' (order will be optimised)' : '';
+        return (
+          <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+            📍 Route: {origin} → {dests}{roundTrip}{optimizationNote}
+          </p>
+        );
+      })()}
 
       {waypoints.length < 2 && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center">

@@ -18,7 +18,16 @@ function getClientIP(req: NextRequest): string {
   );
 }
 
+function cleanupRateLimitMap() {
+  const now = Date.now();
+  // Avoid `for ... of` destructuring which requires newer downlevelIteration
+  rateLimitMap.forEach((v, k) => {
+    if (v.resetAt <= now) rateLimitMap.delete(k);
+  });
+}
+
 function isRateLimited(ip: string): boolean {
+  cleanupRateLimitMap();
   const now = Date.now();
   const entry = rateLimitMap.get(ip);
 
@@ -62,19 +71,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const apiKey =
-      process.env.GOOGLE_MAPS_API_KEY ||
-      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    // Determine requested provider (client may pass it to keep UI/server in sync)
+    const requestedProvider = (body as unknown as { provider?: 'google' | 'here' })?.provider;
+    const envProvider = process.env.MAP_PROVIDER || process.env.NEXT_PUBLIC_MAP_PROVIDER;
+    const provider = requestedProvider ?? (envProvider === 'here' ? 'here' : 'google');
 
-    if (!apiKey || apiKey === 'your_google_maps_api_key_here') {
-      return NextResponse.json(
-        { error: 'Google Maps API key is not configured on the server' },
-        { status: 500 }
-      );
+    // Validate required API keys for the chosen provider
+    if (provider === 'google') {
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      if (!apiKey || apiKey === 'your_google_maps_api_key_here') {
+        return NextResponse.json(
+          { error: 'Google Maps API key is not configured on the server' },
+          { status: 500 }
+        );
+      }
+    } else if (provider === 'here') {
+      const hereKey = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY;
+      if (!hereKey || hereKey === 'your_here_api_key_here') {
+        return NextResponse.json(
+          { error: 'HERE Maps API key is not configured on the server' },
+          { status: 500 }
+        );
+      }
     }
 
-    // Plan the trip
-    const tripPlan = await planTrip(waypoints, settings);
+    // Plan the trip (pass provider so server-side routing matches user's choice)
+    const tripPlan = await planTrip(waypoints, settings, provider);
 
     return NextResponse.json(tripPlan);
   } catch (error) {

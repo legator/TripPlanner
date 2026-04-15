@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID as nodeRandomUUID } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,6 +7,20 @@ const TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const MAX_PAYLOAD_BYTES = 512 * 1024;   // 512 KB
 
 function generateId(): string {
+  // Use a cryptographically secure ID when available
+  try {
+    const globalCrypto = (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (globalCrypto && typeof globalCrypto.randomUUID === 'function') {
+      return globalCrypto.randomUUID().replace(/-/g, '').slice(0, 12);
+    }
+
+    if (typeof nodeRandomUUID === 'function') {
+      return nodeRandomUUID().replace(/-/g, '').slice(0, 12);
+    }
+  } catch {
+    // ignore and fallback to Math.random
+  }
+
   return Math.random().toString(36).slice(2, 6) + Math.random().toString(36).slice(2, 6);
 }
 
@@ -25,7 +40,8 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.text();
-    if (body.length > MAX_PAYLOAD_BYTES) {
+    const size = typeof Buffer !== 'undefined' ? Buffer.byteLength(body, 'utf8') : new TextEncoder().encode(body).length;
+    if (size > MAX_PAYLOAD_BYTES) {
       return NextResponse.json({ error: 'Trip data too large to share' }, { status: 413 });
     }
     JSON.parse(body);

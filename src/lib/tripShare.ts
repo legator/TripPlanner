@@ -12,8 +12,12 @@ export interface SharedTripState {
 export function encodeTripToURL(state: SharedTripState): string {
   try {
     const json = JSON.stringify(state);
-    // btoa works on ASCII; use encodeURIComponent → unescape for full UTF-8 support
-    const encoded = btoa(unescape(encodeURIComponent(json)));
+    // Encode as UTF-8 then base64 to be URL-safe
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(json);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const encoded = btoa(binary);
     const url = new URL(window.location.href);
     url.hash = `trip=${encoded}`;
     return url.toString();
@@ -28,7 +32,10 @@ export function decodeTripFromURL(): SharedTripState | null {
     const hash = window.location.hash;
     const match = hash.match(/^#trip=(.+)$/);
     if (!match) return null;
-    const json = decodeURIComponent(escape(atob(match[1])));
+    const binary = atob(match[1]);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const json = new TextDecoder().decode(bytes);
     return JSON.parse(json) as SharedTripState;
   } catch {
     return null;
