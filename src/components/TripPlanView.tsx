@@ -125,7 +125,7 @@ export default function TripPlanView({
       <div className="space-y-3">
         {tripPlan.days
           .filter((_, i) => selectedDay === null || selectedDay === i)
-          .map((day, _) => (
+          .map((day) => (
             <DayCard
               key={day.dayNumber}
               day={day}

@@ -63,7 +63,7 @@ export function generateGPX(tripPlan: TripPlan): string {
   // Collect all track points from all days
   const trackPoints: Array<{ lat: number; lng: number; name: string }> = [];
 
-  tripPlan.days.forEach((day, dayIndex) => {
+  tripPlan.days.forEach((day) => {
     if (day.isRestDay) return;
 
     // Add start point
@@ -108,7 +108,7 @@ export function generateGPX(tripPlan: TripPlan): string {
   lines.push('  <sym>flag</sym>');
   lines.push('</wpt>');
 
-  tripPlan.days.forEach((day, dayIndex) => {
+  tripPlan.days.forEach((day) => {
     if (day.isRestDay) {
       lines.push(`<wpt lat="${day.endLocation.location.lat}" lon="${day.endLocation.location.lng}">`);
       lines.push(`  <name>Rest Day ${day.dayNumber} - ${escapeXML(day.endLocation.name)}</name>`);

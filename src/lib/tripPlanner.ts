@@ -81,7 +81,7 @@ function getMidpointOfLegs(legs: RouteLeg[]): { lat: number; lng: number } {
   let totalDistance = 0;
   for (const leg of legs) totalDistance += leg.distanceMeters;
 
-  let halfDistance = totalDistance / 2;
+  const halfDistance = totalDistance / 2;
   let accumulated = 0;
 
   for (const leg of legs) {

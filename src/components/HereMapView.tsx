@@ -22,8 +22,11 @@ export default function HereMapView({
   onAddWaypoint,
 }: HereMapViewProps) {
   const mapRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const platformRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectsGroupRef = useRef<any>(null);
   const { isLoaded, loadError } = useHereMaps();
   const onAddWaypointRef = useRef(onAddWaypoint);
@@ -48,13 +51,14 @@ export default function HereMapView({
     });
     mapInstanceRef.current = map;
 
-    const behavior = new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
+    new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
     H.ui.UI.createDefault(map, defaultLayers);
 
     objectsGroupRef.current = new H.map.Group();
     map.addObject(objectsGroupRef.current);
 
     // Click to add waypoint
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     map.addEventListener('tap', async (e: any) => {
       if (!onAddWaypointRef.current) return;
       const coord = map.screenToGeo(
@@ -122,7 +126,6 @@ export default function HereMapView({
     if (waypoints.length === 0) return;
 
     const H = window.H;
-    const bounds = new H.geo.Rect(90, -180, -90, 180);
     let hasPoints = false;
 
     waypoints.forEach((wp, index) => {

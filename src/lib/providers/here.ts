@@ -161,7 +161,15 @@ async function callHereBrowse(
     const data = await response.json();
     if (!response.ok || !data.items) return [];
 
-    return data.items.map((item: any): NearbyPlace => ({
+    interface HPlace {
+      id?: string;
+      title?: string;
+      address?: { label?: string };
+      position?: { lat?: number; lng?: number };
+      averageRating?: number;
+      openingHours?: Array<{ isOpen?: boolean }>;
+    }
+    return data.items.map((item: HPlace): NearbyPlace => ({
       id: item.id || '',
       name: item.title || 'Unknown',
       address: item.address?.label || '',

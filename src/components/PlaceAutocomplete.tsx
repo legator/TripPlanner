@@ -12,7 +12,7 @@ interface PlaceAutocompleteProps {
 
 export default function PlaceAutocomplete({
   onPlaceSelect,
-  placeholder = 'Search for a place...',
+  placeholder: _placeholder = 'Search for a place...',
   disabled = false,
 }: PlaceAutocompleteProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -36,7 +36,7 @@ export default function PlaceAutocomplete({
     placeAutocomplete.style.width = '100%';
 
     // Listen for place selection (gmp-select event per current API)
-    placeAutocomplete.addEventListener('gmp-select', async (event: any) => {
+    placeAutocomplete.addEventListener('gmp-select', async (event: Event & { placePrediction?: google.maps.places.PlacePrediction }) => {
       const { placePrediction } = event;
       if (!placePrediction) return;
 
@@ -76,9 +76,10 @@ export default function PlaceAutocomplete({
 
     containerRef.current.appendChild(placeAutocomplete as unknown as Node);
 
+    const container = containerRef.current;
     return () => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+      if (container) {
+        container.innerHTML = '';
       }
       elementCreatedRef.current = false;
     };

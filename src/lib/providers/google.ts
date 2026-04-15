@@ -173,7 +173,17 @@ export const googleProvider: RoutingProvider = {
       const data = await response.json();
       if (data.error) return [];
 
-      return (data.places || []).map((place: any): NearbyPlace => ({
+      interface GPlace {
+        id?: string;
+        displayName?: { text?: string };
+        formattedAddress?: string;
+        location?: { latitude?: number; longitude?: number };
+        rating?: number;
+        priceLevel?: string;
+        currentOpeningHours?: { openNow?: boolean };
+        photos?: Array<{ name?: string }>;
+      }
+      return (data.places || []).map((place: GPlace): NearbyPlace => ({
         id: place.id || '',
         name: place.displayName?.text || 'Unknown',
         address: place.formattedAddress || '',

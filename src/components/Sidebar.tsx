@@ -9,7 +9,7 @@ import { exportTripToCSV, exportTripItinerary, downloadCSV } from '@/lib/tripCsv
 import { generateGPX, downloadGPX } from '@/lib/tripGpxExport';
 import { generateKML, downloadKML } from '@/lib/tripKmlExport';
 import { generateICS, downloadICS } from '@/lib/tripIcalExport';
-import { copyShareURL, createAndCopyShortLink } from '@/lib/tripShare';
+import { createAndCopyShortLink } from '@/lib/tripShare';
 import { MapProviderChoice } from './MapProviderPicker';
 import SavedTripsPanel from './SavedTripsPanel';
 import { SavedTrip } from '@/lib/savedTrips';
@@ -121,9 +121,7 @@ export default function Sidebar({
     if (!file) return;
 
     try {
-      const text = await file.text();
-      // For now, just show a simple alert that file was read
-      // Full import would require parsing CSV and reconstructing trip
+      await file.text();
       alert(`Imported file: ${file.name}\n\nNote: Full trip import functionality requires manual review of your trip data.`);
     } catch (err) {
       alert('Error reading file: ' + (err instanceof Error ? err.message : 'Unknown error'));

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DayPlan, DaySegment, Waypoint } from '@/lib/types';
+import { DayPlan, Waypoint } from '@/lib/types';
 import { DAY_COLORS } from '@/lib/constants';
 import PlaceCard from './PlaceCard';
 import PlaceAutocomplete from './PlaceAutocomplete';
@@ -271,7 +271,7 @@ export default function DayCard({
               }}
             />
             <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
-              Adds a new stop & re-plans the route (won't change your main stops)
+              Adds a new stop &amp; re-plans the route (won&apos;t change your main stops)
             </p>
           </div>
 

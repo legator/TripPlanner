@@ -271,8 +271,8 @@ export function setDayEndAtSegment(
 export function applyUserEdits(
   plan: TripPlan,
   edits: UserEdits,
-  checkoutTime: string,
-  checkinTime: string
+  _checkoutTime: string,
+  _checkinTime: string
 ): TripPlan {
   let result = plan;
 

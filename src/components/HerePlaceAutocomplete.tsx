@@ -50,7 +50,7 @@ export default function HerePlaceAutocomplete({
       const res = await fetch(url.toString());
       const data = await res.json();
       const items: Suggestion[] = (data.items || []).filter(
-        (item: any) => item.position || item.resultType !== 'chainQuery'
+        (item: { position?: unknown; resultType?: string }) => item.position || item.resultType !== 'chainQuery'
       );
       setSuggestions(items);
       setIsOpen(items.length > 0);

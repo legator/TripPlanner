@@ -267,7 +267,7 @@ export default function TripSettingsPanel({
             className="w-4 h-4 rounded border-gray-300 text-primary-600 
                        focus:ring-primary-500"
           />
-          <span className="text-sm text-gray-700">One-way trip (don't return home)</span>
+          <span className="text-sm text-gray-700">One-way trip (don&apos;t return home)</span>
         </label>
       </div>
 

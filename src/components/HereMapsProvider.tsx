@@ -20,6 +20,7 @@ const HereMapsContext = createContext<HereMapsContextValue>({
 
 declare global {
   interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     H?: any;
   }
 }
