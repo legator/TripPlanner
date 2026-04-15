@@ -6,13 +6,11 @@ import { Waypoint } from '@/lib/types';
 
 interface PlaceAutocompleteProps {
   onPlaceSelect: (waypoint: Waypoint) => void;
-  placeholder?: string;
   disabled?: boolean;
 }
 
 export default function PlaceAutocomplete({
   onPlaceSelect,
-  placeholder: _placeholder = 'Search for a place...',
   disabled = false,
 }: PlaceAutocompleteProps) {
   const containerRef = useRef<HTMLDivElement>(null);

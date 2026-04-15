@@ -201,9 +201,7 @@ export default function Home() {
       // Re-apply user edits (rest days, day-end choices) on the fresh plan
       const finalPlan = applyUserEdits(
         data,
-        userEditsRef.current,
-        settings.checkoutTime,
-        settings.checkinTime
+        userEditsRef.current
       );
       setTripPlan(finalPlan);
       setSelectedDay(null);
