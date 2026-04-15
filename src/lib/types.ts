@@ -23,6 +23,8 @@ export enum PlaceType {
   GAS_STATION = 'gas_station',
   ATTRACTION = 'attraction',
   RESTAURANT = 'restaurant',
+  EV_CHARGING = 'ev_charging',
+  CAMPGROUND = 'campground',
 }
 
 export interface Waypoint {
@@ -49,6 +51,14 @@ export interface TripSettings {
   sightseeingMinutesPerStop: number;
   /** Insert a rest day (no driving) every N driving days (0 = never) */
   restDayEvery: number;
+  /** If true, the trip ends at the last waypoint (no return home) */
+  oneWayTrip: boolean;
+  /** Fuel price per litre in local currency (for cost estimation) */
+  fuelPricePerLiter: number;
+  /** Vehicle fuel consumption in litres per 100 km */
+  fuelEfficiencyLPer100km: number;
+  /** If true, request traffic-aware ETAs from the routing API (Google only, future dates only) */
+  useTrafficData: boolean;
 }
 
 export type ScheduleEventType =
@@ -103,6 +113,10 @@ export interface DayPlan {
   hotelSuggestions: Place[];
   attractions: Place[];
   restaurants: Place[];
+  evChargingStops: Place[];
+  campgrounds: Place[];
+  /** Estimated fuel cost for this day's driving */
+  estimatedFuelCost?: number;
   /** Array of encoded polyline segments (one per step) – decode individually */
   polylineSegments: string[];
   /** Timeline of the day */
@@ -119,11 +133,18 @@ export interface TripPlan {
   waypointOrder: number[];
   overviewPolyline: string;
   departureDate: string;
+  /** Estimated total fuel cost for the entire trip */
+  estimatedTotalFuelCost?: number;
 }
 
 export interface PlanTripRequest {
   waypoints: Waypoint[];
   settings: TripSettings;
+}
+
+// Optional provider field allows the client to request a specific routing provider
+export interface PlanTripRequestWithProvider extends PlanTripRequest {
+  provider?: 'google' | 'here';
 }
 
 export type ActiveView = 'input' | 'plan';

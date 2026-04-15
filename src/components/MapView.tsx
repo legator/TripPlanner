@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useGoogleMaps } from './GoogleMapsProvider';
-import { DayPlan, Place, PlaceType } from '@/lib/types';
+import { DayPlan } from '@/lib/types';
 import { DAY_COLORS, MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/lib/constants';
 import { Waypoint } from '@/lib/types';
 

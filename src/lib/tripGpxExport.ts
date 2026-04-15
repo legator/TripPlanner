@@ -4,7 +4,7 @@ import { TripPlan, LatLng } from './types';
  * Convert encoded polyline to array of lat/lng coordinates
  * Based on Google Maps' polyline encoding algorithm
  */
-function decodePolyline(encoded: string): LatLng[] {
+export function decodePolyline(encoded: string): LatLng[] {
   const points: LatLng[] = [];
   let index = 0;
   let lat = 0;
@@ -63,7 +63,7 @@ export function generateGPX(tripPlan: TripPlan): string {
   // Collect all track points from all days
   const trackPoints: Array<{ lat: number; lng: number; name: string }> = [];
 
-  tripPlan.days.forEach((day, dayIndex) => {
+  tripPlan.days.forEach((day) => {
     if (day.isRestDay) return;
 
     // Add start point
@@ -108,7 +108,7 @@ export function generateGPX(tripPlan: TripPlan): string {
   lines.push('  <sym>flag</sym>');
   lines.push('</wpt>');
 
-  tripPlan.days.forEach((day, dayIndex) => {
+  tripPlan.days.forEach((day) => {
     if (day.isRestDay) {
       lines.push(`<wpt lat="${day.endLocation.location.lat}" lon="${day.endLocation.location.lng}">`);
       lines.push(`  <name>Rest Day ${day.dayNumber} - ${escapeXML(day.endLocation.name)}</name>`);

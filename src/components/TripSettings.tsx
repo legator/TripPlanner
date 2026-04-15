@@ -1,17 +1,22 @@
 'use client';
 
 import { TripSettings } from '@/lib/types';
+import { MapProviderChoice } from './MapProviderPicker';
 
 interface TripSettingsProps {
   settings: TripSettings;
   onChange: (settings: TripSettings) => void;
   disabled?: boolean;
+  currentMapProvider?: MapProviderChoice;
+  onChangeMapProvider?: () => void;
 }
 
 export default function TripSettingsPanel({
   settings,
   onChange,
   disabled = false,
+  currentMapProvider,
+  onChangeMapProvider,
 }: TripSettingsProps) {
   const update = (partial: Partial<TripSettings>) => {
     onChange({ ...settings, ...partial });
@@ -22,6 +27,25 @@ export default function TripSettingsPanel({
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
         Trip Settings
       </h3>
+
+      {onChangeMapProvider && (
+        <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <div>
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
+              Map provider
+            </p>
+            <p className="text-sm font-semibold text-gray-800 dark:text-white capitalize">
+              {currentMapProvider === 'here' ? '📍 HERE Maps' : '🌐 Google Maps'}
+            </p>
+          </div>
+          <button
+            onClick={onChangeMapProvider}
+            className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+          >
+            Change
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         {/* Max driving hours */}
@@ -233,6 +257,90 @@ export default function TripSettingsPanel({
           />
           <span className="text-sm text-gray-700">Avoid highways</span>
         </label>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={settings.oneWayTrip ?? false}
+            onChange={(e) => update({ oneWayTrip: e.target.checked })}
+            disabled={disabled}
+            className="w-4 h-4 rounded border-gray-300 text-primary-600 
+                       focus:ring-primary-500"
+          />
+          <span className="text-sm text-gray-700">One-way trip (don&apos;t return home)</span>
+        </label>
+      </div>
+
+      {/* Fuel cost estimation */}
+      <div>
+        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          ⛽ Fuel Cost Estimation
+        </h4>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Price per litre
+            </label>
+            <input
+              type="number"
+              value={settings.fuelPricePerLiter ?? 1.8}
+              onChange={(e) => update({ fuelPricePerLiter: Number(e.target.value) })}
+              min={0.1}
+              max={10}
+              step={0.05}
+              disabled={disabled}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg 
+                         focus:outline-none focus:ring-2 focus:ring-primary-500 
+                         disabled:bg-gray-100"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              L/100 km
+            </label>
+            <input
+              type="number"
+              value={settings.fuelEfficiencyLPer100km ?? 8.0}
+              onChange={(e) => update({ fuelEfficiencyLPer100km: Number(e.target.value) })}
+              min={1}
+              max={30}
+              step={0.5}
+              disabled={disabled}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg 
+                         focus:outline-none focus:ring-2 focus:ring-primary-500 
+                         disabled:bg-gray-100"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Traffic-aware routing */}
+      <div className="flex items-center justify-between py-2">
+        <div>
+          <p id="traffic-aware-label" className="text-xs font-medium text-gray-600 dark:text-gray-300">
+            Traffic-aware ETAs
+          </p>
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            Google Maps only · future dates · Drive API billing
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={settings.useTrafficData ?? true}
+          aria-labelledby="traffic-aware-label"
+          onClick={() => update({ useTrafficData: !(settings.useTrafficData ?? true) })}
+          disabled={disabled}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 ${
+            (settings.useTrafficData ?? true) ? 'bg-primary-600' : 'bg-gray-200'
+          }`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              (settings.useTrafficData ?? true) ? 'translate-x-6' : 'translate-x-1'
+            }`}
+          />
+        </button>
       </div>
     </div>
   );

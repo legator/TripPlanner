@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { DayPlan, DaySegment, Waypoint } from '@/lib/types';
+import { DayPlan, Waypoint } from '@/lib/types';
 import { DAY_COLORS } from '@/lib/constants';
 import PlaceCard from './PlaceCard';
 import PlaceAutocomplete from './PlaceAutocomplete';
+import WeatherBadge from './WeatherBadge';
 
 interface DayCardProps {
   day: DayPlan;
@@ -68,14 +69,14 @@ export default function DayCard({
   return (
     <div
       className={`day-card rounded-xl border-2 slide-in ${
-        isSelected ? 'border-primary-400 shadow-md' : 'border-gray-100'
+        isSelected ? 'border-primary-400 shadow-md' : 'border-gray-100 dark:border-gray-700'
       }`}
       style={{ animationDelay: `${dayIndex * 80}ms`, borderLeftColor: color, borderLeftWidth: '4px' }}
     >
       {/* Header */}
       <button
         onClick={() => onSelect(isSelected ? null : dayIndex)}
-        className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 transition-colors text-left"
+        className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-left"
       >
         <div
           className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
@@ -85,28 +86,35 @@ export default function DayCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-gray-800">
+            <span className="text-sm font-semibold text-gray-800 dark:text-white">
               {day.isRestDay ? `Day ${day.dayNumber} — Rest Day` : `Day ${day.dayNumber}`}
             </span>
-            <span className="text-xs text-gray-400">{formatDate(day.date)}</span>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{formatDate(day.date)}</span>
           </div>
           {day.isRestDay ? (
-            <p className="text-xs text-gray-500 truncate mt-0.5">
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
               Relax in {day.startLocation.name.split(',')[0]}
             </p>
           ) : (
-            <p className="text-xs text-gray-500 truncate mt-0.5">
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
               {day.startLocation.name.split(',')[0]} → {day.endLocation.name.split(',')[0]}
             </p>
           )}
+          <div className="mt-1">
+            <WeatherBadge
+              lat={day.endLocation.location.lat}
+              lng={day.endLocation.location.lng}
+              date={day.date}
+            />
+          </div>
         </div>
         {!day.isRestDay && (
           <div className="flex-shrink-0 text-right">
-            <p className={`text-sm font-semibold ${overDistance ? 'text-amber-600' : 'text-gray-700'}`}>
+            <p className={`text-sm font-semibold ${overDistance ? 'text-amber-600 dark:text-amber-400' : 'text-gray-700 dark:text-gray-300'}`}>
               {day.distanceKm} km
               {overDistance && <span className="ml-0.5" title={`Exceeds ${maxDistanceKm} km limit`}>⚠️</span>}
             </p>
-            <p className={`text-xs ${overTime ? 'text-amber-600' : 'text-gray-400'}`}>
+            <p className={`text-xs ${overTime ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}`}>
               {formatDuration(day.durationMinutes)}
               {overTime && <span className="ml-0.5" title={`Exceeds ${formatDuration(maxDrivingMinutes)} limit`}>⚠️</span>}
             </p>
@@ -116,7 +124,7 @@ export default function DayCard({
 
       {/* Over-limit warning */}
       {overLimit && (
-        <div className="mx-3 mb-2 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700 flex items-center gap-1.5">
+        <div className="mx-3 mb-2 px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
           <span>⚠️</span>
           <span>
             This day exceeds your{overDistance ? ` ${maxDistanceKm} km` : ''}
@@ -128,7 +136,7 @@ export default function DayCard({
       )}
 
       {/* Summary stats */}
-      <div className="flex items-center gap-3 px-3 pb-2 text-xs text-gray-500 flex-wrap">
+      <div className="flex items-center gap-3 px-3 pb-2 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
         {day.schedule.length > 0 && (
           <span className="flex items-center gap-1">
             🗓️ {day.schedule[0].time}–{day.schedule[day.schedule.length - 1].time}
@@ -201,14 +209,14 @@ export default function DayCard({
       {showEndStopPicker && !day.isRestDay && (
         <div className="px-3 pb-3 space-y-2" onClick={(e) => e.stopPropagation()}>
           {/* Debug info */}
-          <p className="text-[10px] text-gray-300">
+          <p className="text-[10px] text-gray-300 dark:text-gray-600">
             Pool: {day.segments.length} seg(s) this day
             {nextDrivingDay ? ` + ${nextDaySegments.length} from Day ${nextDrivingDay.dayNumber}` : ' (no next driving day)'}
             {' • dayIndex='}{dayIndex}
           </p>
           {/* Dropdown: pick from existing route stops */}
           <div>
-            <label className="text-[10px] text-gray-400 uppercase tracking-wide block mb-1">
+            <label className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide block mb-1">
               Stop at (along current route)
             </label>
             <select
@@ -220,7 +228,7 @@ export default function DayCard({
                   setShowEndStopPicker(false);
                 }
               }}
-              className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg bg-white
+              className="w-full px-2.5 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-200
                          focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none
                          cursor-pointer"
             >
@@ -246,10 +254,10 @@ export default function DayCard({
           </div>
 
           {/* Divider */}
-          <div className="flex items-center gap-2 text-[10px] text-gray-300">
-            <div className="flex-1 h-px bg-gray-200" />
+          <div className="flex items-center gap-2 text-[10px] text-gray-300 dark:text-gray-600">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
             <span>or add a new stop</span>
-            <div className="flex-1 h-px bg-gray-200" />
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
           </div>
 
           {/* Search: add a completely new stop */}
@@ -262,8 +270,8 @@ export default function DayCard({
                 onAddOvernightStop(dayIndex, waypoint);
               }}
             />
-            <p className="text-[10px] text-gray-400 mt-1">
-              Adds a new stop & re-plans the route (won't change your main stops)
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+              Adds a new stop &amp; re-plans the route (won&apos;t change your main stops)
             </p>
           </div>
 
@@ -275,29 +283,29 @@ export default function DayCard({
 
       {/* ── Expanded details ── */}
       {expanded && (
-        <div className="border-t border-gray-100 p-3 space-y-4 bg-gray-50/50">
+        <div className="border-t border-gray-100 dark:border-gray-700 p-3 space-y-4 bg-gray-50/50 dark:bg-gray-800/50">
           {/* Schedule timeline */}
           {day.schedule.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
                 Day Schedule
               </h4>
               <div className="relative pl-6 space-y-0">
-                <div className="absolute left-2.5 top-1 bottom-1 w-px bg-gray-200" />
+                <div className="absolute left-2.5 top-1 bottom-1 w-px bg-gray-200 dark:bg-gray-600" />
                 {day.schedule.map((event, i) => (
                   <div key={i} className="relative flex items-start gap-2 py-1.5">
                     <div
-                      className="absolute -left-[14px] top-2 w-2.5 h-2.5 rounded-full border-2 border-white shadow-sm"
+                      className="absolute -left-[14px] top-2 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-gray-800 shadow-sm"
                       style={{ backgroundColor: event.type === 'drive' ? color : '#9ca3af' }}
                     />
-                    <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">
+                    <span className="text-xs font-mono text-gray-400 dark:text-gray-500 w-12 flex-shrink-0">
                       {event.time}
                     </span>
                     <span className="text-sm flex-shrink-0">{event.icon}</span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-700">{event.title}</p>
+                      <p className="text-xs text-gray-700 dark:text-gray-300">{event.title}</p>
                       {event.endTime && (
-                        <p className="text-[10px] text-gray-400">
+                        <p className="text-[10px] text-gray-400 dark:text-gray-500">
                           until {event.endTime}
                           {event.durationMinutes > 0 && ` · ${formatDuration(event.durationMinutes)}`}
                         </p>
@@ -312,7 +320,7 @@ export default function DayCard({
           {/* Gas stations */}
           {day.gasStops.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
                 Gas Stations
               </h4>
               <div className="space-y-0.5">
@@ -323,10 +331,24 @@ export default function DayCard({
             </div>
           )}
 
+          {/* EV Charging */}
+          {day.evChargingStops?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
+                EV Charging
+              </h4>
+              <div className="space-y-0.5">
+                {day.evChargingStops.map((ev) => (
+                  <PlaceCard key={ev.id} place={ev} icon="⚡" compact />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Hotels */}
           {day.hotelSuggestions.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
                 Where to Stay
               </h4>
               <div className="space-y-1.5">
@@ -337,10 +359,24 @@ export default function DayCard({
             </div>
           )}
 
+          {/* Campgrounds */}
+          {day.campgrounds?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
+                Campgrounds
+              </h4>
+              <div className="space-y-1.5">
+                {day.campgrounds.slice(0, 3).map((camp) => (
+                  <PlaceCard key={camp.id} place={camp} icon="🏕️" />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Attractions */}
           {day.attractions.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
                 Nearby Attractions
               </h4>
               <div className="space-y-1.5">
@@ -354,7 +390,7 @@ export default function DayCard({
           {/* Restaurants */}
           {day.restaurants.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
                 Places to Eat
               </h4>
               <div className="space-y-0.5">

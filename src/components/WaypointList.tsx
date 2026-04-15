@@ -1,7 +1,8 @@
 'use client';
 
 import { Waypoint } from '@/lib/types';
-import PlaceAutocomplete from './PlaceAutocomplete';
+import PlaceSearch from './PlaceSearch';
+import type { MapProviderChoice } from './MapProviderPicker';
 
 interface WaypointListProps {
   waypoints: Waypoint[];
@@ -9,6 +10,9 @@ interface WaypointListProps {
   onRemove: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   disabled?: boolean;
+  oneWayTrip?: boolean;
+  supportsOptimization?: boolean;
+  currentMapProvider?: MapProviderChoice;
 }
 
 export default function WaypointList({
@@ -17,6 +21,9 @@ export default function WaypointList({
   onRemove,
   onReorder,
   disabled = false,
+  oneWayTrip = false,
+  supportsOptimization = false,
+  currentMapProvider,
 }: WaypointListProps) {
   const moveUp = (index: number) => {
     if (index > 1) onReorder(index, index - 1); // Don't move above origin
@@ -29,10 +36,10 @@ export default function WaypointList({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
           Stops
         </h3>
-        <span className="text-xs text-gray-400">{waypoints.length} places</span>
+        <span className="text-xs text-gray-400 dark:text-gray-500">{waypoints.length} places</span>
       </div>
 
       {/* Waypoint list */}
@@ -40,7 +47,7 @@ export default function WaypointList({
         {waypoints.map((wp, index) => (
           <div
             key={wp.id}
-            className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg group hover:bg-gray-100 transition-colors"
+            className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-700 rounded-lg group hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
           >
             {/* Index indicator */}
             <div
@@ -54,10 +61,10 @@ export default function WaypointList({
 
             {/* Place info */}
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-800 truncate">
+              <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
                 {wp.name}
               </p>
-              <p className="text-xs text-gray-500 truncate">{wp.address}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{wp.address}</p>
             </div>
 
             {/* Actions */}
@@ -66,7 +73,7 @@ export default function WaypointList({
                 <button
                   onClick={() => moveUp(index)}
                   disabled={disabled}
-                  className="p-1 text-gray-400 hover:text-gray-600"
+                  className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                   title="Move up"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -78,7 +85,7 @@ export default function WaypointList({
                 <button
                   onClick={() => moveDown(index)}
                   disabled={disabled}
-                  className="p-1 text-gray-400 hover:text-gray-600"
+                  className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                   title="Move down"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -105,7 +112,7 @@ export default function WaypointList({
 
       {/* Add waypoint input */}
       <div>
-        <PlaceAutocomplete
+        <PlaceSearch
           onPlaceSelect={onAdd}
           placeholder={
             waypoints.length === 0
@@ -113,18 +120,24 @@ export default function WaypointList({
               : '📍 Add a destination to visit...'
           }
           disabled={disabled}
+          currentMapProvider={currentMapProvider}
         />
       </div>
 
-      {waypoints.length >= 1 && (
-        <p className="text-xs text-gray-400 text-center">
-          📍 Route: {waypoints[0]?.name} → {waypoints.slice(1).map(w => w.name).join(' → ')}{waypoints.length > 1 ? ` → ${waypoints[0]?.name}` : ''}
-          {' '}(order will be optimised)
-        </p>
-      )}
+      {waypoints.length >= 1 && (() => {
+        const origin = waypoints[0]?.name;
+        const dests = waypoints.slice(1).map((w) => w.name).join(' → ');
+        const roundTrip = !oneWayTrip && waypoints.length > 1 ? ` → ${origin}` : '';
+        const optimizationNote = supportsOptimization ? ' (order will be optimised)' : '';
+        return (
+          <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+            📍 Route: {origin} → {dests}{roundTrip}{optimizationNote}
+          </p>
+        );
+      })()}
 
       {waypoints.length < 2 && (
-        <p className="text-xs text-gray-400 text-center">
+        <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
           Add at least 2 places to plan your trip
         </p>
       )}

@@ -1,4 +1,4 @@
-import { DayPlan, DaySegment, Waypoint, TripSettings } from './types';
+import { DayPlan, DaySegment, TripSettings } from './types';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!;
 
