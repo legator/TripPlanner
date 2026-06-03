@@ -104,13 +104,28 @@ async function callHereRouting(
   return data.routes[0].sections as HereSection[];
 }
 
+function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371e3; // metres
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) *
+    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
 function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAddress: string): RouteLeg {
   const { polyline: decoded } = decodeFlexPolyline(section.polyline);
   const points = decoded as [number, number][];
 
   // We chunk the single section into ~20km steps to allow `splitLegBySteps` 
   // in tripPlanner to correctly enforce max distance/duration limits.
-  const CHUNK_SIZE_M = 20000; 
+  const CHUNK_SIZE_M = 20000;
   const numSteps = Math.max(1, Math.ceil(section.summary.length / CHUNK_SIZE_M));
   const pointsPerStep = Math.ceil(points.length / numSteps);
   const distPerStep = section.summary.length / numSteps;
@@ -144,6 +159,7 @@ function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAd
     startLocation: section.departure.place.location,
     endLocation: section.arrival.place.location,
     steps,
+    steps,
   };
 }
 
@@ -156,33 +172,33 @@ export async function callHereWaypointsSequence(
   settings: TripSettings
 ): Promise<number[]> {
   if (intermediates.length === 0) return [];
-  
+
   const url = new URL('https://wse.router.hereapi.com/v8/sequences');
   url.searchParams.set('apiKey', API_KEY);
-  
+
   // Start and end are fixed
   url.searchParams.set('start', `start;${origin.location.lat},${origin.location.lng}`);
   url.searchParams.set('end', `end;${destination.location.lat},${destination.location.lng}`);
-  
+
   for (let i = 0; i < intermediates.length; i++) {
     const wp = intermediates[i];
     url.searchParams.append('destination', `wp${i};${wp.location.lat},${wp.location.lng}`);
   }
-  
+
   url.searchParams.set('mode', `fastest;${settings.transportMode || 'car'}`);
-  
+
   const response = await fetch(url.toString());
   const data = await response.json();
-  
+
   if (!response.ok || !data.results || data.results.length === 0) {
     console.warn('HERE Waypoints Sequence failed:', data);
     return intermediates.map((_, i) => i); // return original order on failure
   }
-  
+
   const waypoints = data.results[0].waypoints;
   // Extract intermediate order (skip first and last which are start/end)
   const orderedIds = waypoints.slice(1, -1).map((wp: any) => wp.id as string);
-  
+
   const order = orderedIds.map(id => parseInt(id.replace('wp', ''), 10));
   return order;
 }
