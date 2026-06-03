@@ -12,8 +12,6 @@ import { decode as decodeFlexPolyline } from '@here/flexpolyline';
 import { Waypoint, TripSettings } from '../types';
 import { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';
 
-import { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';
-
 const API_KEY = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY!;
 
 // ─── Google Polyline encoder (needed to re-encode HERE flexible polylines) ───
@@ -143,8 +141,7 @@ function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAd
     endAddress,
     startLocation: section.departure.place.location,
     endLocation: section.arrival.place.location,
-    steps,
-    steps,
+    steps
   };
 }
 
@@ -184,7 +181,7 @@ export async function callHereWaypointsSequence(
   // Extract intermediate order (skip first and last which are start/end)
   const orderedIds = waypoints.slice(1, -1).map((wp: { id: string }) => wp.id);
 
-  const order = orderedIds.map(id => parseInt(id.replace('wp', ''), 10));
+  const order = orderedIds.map((id: string) => parseInt(id.replace('wp', ''), 10));
   return order;
 }
 
