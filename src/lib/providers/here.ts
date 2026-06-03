@@ -104,21 +104,68 @@ async function callHereRouting(
   return data.routes[0].sections as HereSection[];
 }
 
+function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371e3; // metres
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
 function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAddress: string): RouteLeg {
   const { polyline: decoded } = decodeFlexPolyline(section.polyline);
   const points = decoded as [number, number][];
 
-  // Split into "steps" — for HERE we create a single step per section
-  // (no step-level detail in the basic polyline return)
-  const googleEncoded = encodeGooglePolyline(points);
+  // HERE returns a single polyline for the entire section.
+  // To allow the trip planner to split days accurately, we break this polyline
+  // into artificial "steps" of max 50km.
+  const CHUNK_MAX_METERS = 50000;
+  const speedMps = section.summary.length > 0 ? section.summary.duration / section.summary.length : 0;
 
-  const step: RouteStep = {
-    distanceMeters: section.summary.length,
-    durationSeconds: section.summary.duration,
-    startLocation: section.departure.place.location,
-    endLocation: section.arrival.place.location,
-    encodedPolyline: googleEncoded,
-  };
+  const steps: RouteStep[] = [];
+  let currentPoints: [number, number][] = [points[0]];
+  let currentDist = 0;
+
+  for (let i = 1; i < points.length; i++) {
+    const p1 = points[i - 1];
+    const p2 = points[i];
+    const d = getDistanceMeters(p1[0], p1[1], p2[0], p2[1]);
+    
+    currentPoints.push(p2);
+    currentDist += d;
+
+    // Flush chunk if it exceeds limit or is the last point
+    if (currentDist >= CHUNK_MAX_METERS || i === points.length - 1) {
+      steps.push({
+        distanceMeters: Math.round(currentDist),
+        durationSeconds: Math.round(currentDist * speedMps),
+        startLocation: { lat: currentPoints[0][0], lng: currentPoints[0][1] },
+        endLocation: { lat: p2[0], lng: p2[1] },
+        encodedPolyline: encodeGooglePolyline(currentPoints),
+      });
+      // Start next chunk
+      currentPoints = [p2];
+      currentDist = 0;
+    }
+  }
+
+  // Handle case where polyline had 0 or 1 points
+  if (steps.length === 0) {
+    steps.push({
+      distanceMeters: section.summary.length,
+      durationSeconds: section.summary.duration,
+      startLocation: section.departure.place.location,
+      endLocation: section.arrival.place.location,
+      encodedPolyline: encodeGooglePolyline(points),
+    });
+  }
 
   return {
     distanceMeters: section.summary.length,
@@ -127,7 +174,7 @@ function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAd
     endAddress,
     startLocation: section.departure.place.location,
     endLocation: section.arrival.place.location,
-    steps: [step],
+    steps,
   };
 }
 
