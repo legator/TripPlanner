@@ -25,8 +25,8 @@ export function describeWeather(code: number): { emoji: string; label: string } 
 }
 
 /**
- * Fetches a daily weather forecast for a single location using Open-Meteo.
- * No API key required. Data available up to 16 days ahead.
+ * Fetches a daily weather forecast using HERE Destination Weather API.
+ * Data available up to 7 days ahead.
  */
 export async function fetchWeather(
   lat: number,
@@ -34,30 +34,63 @@ export async function fetchWeather(
   startDate: string, // YYYY-MM-DD
   days = 1
 ): Promise<DayWeather[]> {
-  const endDate = new Date(startDate);
-  endDate.setDate(endDate.getDate() + days - 1);
-  const endStr = endDate.toISOString().split('T')[0];
+  const API_KEY = process.env.NEXT_PUBLIC_HERE_API_KEY || process.env.HERE_API_KEY || '';
+  if (!API_KEY) return [];
 
-  const url = new URL('https://api.open-meteo.com/v1/forecast');
-  url.searchParams.set('latitude', String(lat));
-  url.searchParams.set('longitude', String(lng));
-  url.searchParams.set('daily', 'weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max');
-  url.searchParams.set('timezone', 'auto');
-  url.searchParams.set('start_date', startDate);
-  url.searchParams.set('end_date', endStr);
+  const url = new URL('https://weather.hereapi.com/v3/report');
+  url.searchParams.set('apiKey', API_KEY);
+  url.searchParams.set('products', 'forecast7daysSimple');
+  url.searchParams.set('location', `${lat},${lng}`);
 
-  const res = await fetch(url.toString());
-  if (!res.ok) return [];
-  const data = await res.json();
-  const d = data.daily;
-  if (!d?.time) return [];
+  try {
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      console.error('Weather fetch error:', res.status, await res.text());
+      return [];
+    }
+    const data = await res.json();
+    
+    const forecasts = data.places?.[0]?.dailyForecasts?.[0]?.forecasts;
+    if (!forecasts) return [];
 
-  return (d.time as string[]).map((date: string, i: number) => ({
-    date,
-    tempMaxC: Math.round(d.temperature_2m_max[i] ?? 0),
-    tempMinC: Math.round(d.temperature_2m_min[i] ?? 0),
-    precipitationMm: Math.round((d.precipitation_sum[i] ?? 0) * 10) / 10,
-    windspeedKmh: Math.round(d.windspeed_10m_max[i] ?? 0),
-    weatherCode: d.weathercode[i] ?? 0,
-  }));
+    // Filter forecasts by requested date range
+    const start = new Date(startDate);
+    const end = new Date(start);
+    end.setDate(end.getDate() + days - 1);
+
+    const startStr = start.toISOString().split('T')[0];
+    const endStr = end.toISOString().split('T')[0];
+
+    const results: DayWeather[] = [];
+    for (const f of forecasts) {
+      const fDate = new Date(f.time).toISOString().split('T')[0];
+      if (fDate >= startStr && fDate <= endStr) {
+        // Map HERE weather icon ID to WMO roughly
+        // 1-2: sunny, 3-4: partly cloudy, 5-6: cloudy, 7-14: rain, 15-18: snow
+        let code = 0;
+        const icon = f.iconId || 0;
+        if (icon >= 3 && icon <= 4) code = 2; // partly cloudy
+        else if (icon >= 5 && icon <= 6) code = 3; // overcast
+        else if (icon >= 7 && icon <= 14) code = 61; // rain
+        else if (icon >= 15 && icon <= 18) code = 71; // snow
+        else if (icon >= 19 && icon <= 22) code = 95; // thunderstorm
+        else if (icon >= 23 && icon <= 28) code = 45; // fog / misc
+        else if (icon >= 29 && icon <= 34) code = 82; // showers
+        
+        results.push({
+          date: fDate,
+          tempMaxC: Math.round(Number(f.highTemperature || 0)),
+          tempMinC: Math.round(Number(f.lowTemperature || 0)),
+          precipitationMm: Number(f.precipitationProbability ?? 0), // HERE simple doesn't always give mm, use prob
+          windspeedKmh: Math.round(Number(f.windSpeed || 0)),
+          weatherCode: code,
+        });
+      }
+    }
+    
+    return results;
+  } catch (err) {
+    console.error('Weather fetch error:', err);
+    return [];
+  }
 }

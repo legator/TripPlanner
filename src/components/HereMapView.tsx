@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useHereMaps } from './HereMapsProvider';
 import { DayPlan, Waypoint } from '@/lib/types';
 import { DAY_COLORS, MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/lib/constants';
 import { decodePolyline } from '@/lib/tripGpxExport';
+import { callHereIsoline } from '@/lib/providers/here';
 
 const HERE_API_KEY = process.env.NEXT_PUBLIC_HERE_API_KEY || '';
 
@@ -30,6 +31,12 @@ export default function HereMapView({
   const objectsGroupRef = useRef<any>(null);
   const { isLoaded, loadError } = useHereMaps();
   const onAddWaypointRef = useRef(onAddWaypoint);
+  const [showTraffic, setShowTraffic] = useState(false);
+  const [isolinePoints, setIsolinePoints] = useState<{lat: number, lng: number}[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const trafficLayerRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isolinePolygonRef = useRef<any>(null);
 
   useEffect(() => {
     onAddWaypointRef.current = onAddWaypoint;
@@ -50,6 +57,7 @@ export default function HereMapView({
       pixelRatio: window.devicePixelRatio || 1,
     });
     mapInstanceRef.current = map;
+    trafficLayerRef.current = defaultLayers.vector.normal.traffic;
 
     new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
     H.ui.UI.createDefault(map, defaultLayers);
@@ -101,8 +109,47 @@ export default function HereMapView({
     return () => resizeObserver.disconnect();
   }, [isLoaded]);
 
+  // Traffic layer toggle
+  useEffect(() => {
+    if (!mapInstanceRef.current || !trafficLayerRef.current) return;
+    if (showTraffic) {
+      mapInstanceRef.current.addLayer(trafficLayerRef.current);
+    } else {
+      mapInstanceRef.current.removeLayer(trafficLayerRef.current);
+    }
+  }, [showTraffic]);
+
+  // Render Isoline Polygon
+  useEffect(() => {
+    const H = window.H;
+    if (!mapInstanceRef.current || !objectsGroupRef.current) return;
+
+    if (isolinePolygonRef.current) {
+      objectsGroupRef.current.removeObject(isolinePolygonRef.current);
+      isolinePolygonRef.current = null;
+    }
+
+    if (isolinePoints && isolinePoints.length > 0) {
+      const lineString = new H.geo.LineString();
+      isolinePoints.forEach(p => lineString.pushPoint(p));
+      const polygon = new H.map.Polygon(lineString, {
+        style: {
+          fillColor: 'rgba(59, 130, 246, 0.2)', // blue-500 with opacity
+          strokeColor: 'rgba(37, 99, 235, 0.8)', // blue-600
+          lineWidth: 2,
+        }
+      });
+      isolinePolygonRef.current = polygon;
+      objectsGroupRef.current.addObject(polygon);
+      
+      const viewBounds = polygon.getBoundingBox();
+      mapInstanceRef.current.getViewModel().setLookAtData({ bounds: viewBounds }, true);
+    }
+  }, [isolinePoints]);
+
   const clearObjects = useCallback(() => {
     objectsGroupRef.current?.removeAll();
+    setIsolinePoints(null);
   }, []);
 
   const addMarker = useCallback((lat: number, lng: number, icon: string, title: string) => {
@@ -110,9 +157,21 @@ export default function HereMapView({
     if (!mapInstanceRef.current || !objectsGroupRef.current) return;
 
     const el = document.createElement('div');
-    el.style.cssText = 'font-size:24px;cursor:pointer;line-height:1';
+    el.style.cssText = 'font-size:24px;cursor:pointer;line-height:1;transition:transform 0.1s;';
     el.textContent = icon;
-    el.title = title;
+    el.title = title + ' (Click to see 15-min reachable area)';
+    
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      el.style.transform = 'scale(1.2)';
+      setTimeout(() => { el.style.transform = 'none'; }, 200);
+      try {
+        const points = await callHereIsoline(lat, lng, 15, 'car');
+        setIsolinePoints(points);
+      } catch (err) {
+        console.error('Failed to fetch isoline:', err);
+      }
+    });
 
     const domIcon = new H.map.DomIcon(el);
     const marker = new H.map.DomMarker({ lat, lng }, { icon: domIcon });
@@ -245,5 +304,24 @@ export default function HereMapView({
     );
   }
 
-  return <div ref={mapRef} className="w-full h-full" />;
+  return (
+    <div className="relative w-full h-full">
+      <div ref={mapRef} className="w-full h-full" />
+      
+      {/* Traffic Toggle */}
+      <div className="absolute top-4 right-4 z-[1]">
+        <button
+          onClick={() => setShowTraffic(!showTraffic)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-md font-medium text-sm transition-colors ${
+            showTraffic 
+              ? 'bg-blue-600 text-white hover:bg-blue-700' 
+              : 'bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          <span>🚥</span>
+          {showTraffic ? 'Hide Traffic' : 'Show Traffic'}
+        </button>
+      </div>
+    </div>
+  );
 }

@@ -171,7 +171,7 @@ export default function Home() {
 
     try {
       const day = tripPlan.days[dayIndex];
-      const optimizedSegments = await optimizeDayRoute(day, settings);
+      const optimizedSegments = await optimizeDayRoute(day, settings, mapProvider || 'google');
 
       setTripPlan((prev) =>
         prev
@@ -191,7 +191,7 @@ export default function Home() {
     } finally {
       setIsPlanning(false);
     }
-  }, [tripPlan, settings]);
+  }, [tripPlan, settings, mapProvider]);
 
   // Add an overnight stop and re-plan — accumulates stops, doesn't touch main waypoint list
   const handleAddOvernightStop = useCallback(async (dayIndex: number, waypoint: Waypoint) => {

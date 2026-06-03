@@ -12,7 +12,7 @@ import { decode as decodeFlexPolyline } from '@here/flexpolyline';
 import { Waypoint, TripSettings } from '../types';
 import { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';
 
-const API_KEY = process.env.HERE_API_KEY!;
+const API_KEY = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY!;
 
 // ─── Google Polyline encoder (needed to re-encode HERE flexible polylines) ───
 
@@ -70,10 +70,14 @@ async function callHereRouting(
 ): Promise<HereSection[]> {
   const url = new URL('https://router.hereapi.com/v8/routes');
   url.searchParams.set('apiKey', API_KEY);
-  url.searchParams.set('transportMode', 'car');
+  url.searchParams.set('transportMode', settings.transportMode || 'car');
   url.searchParams.set('return', 'polyline,summary');
   url.searchParams.set('origin', `${origin.location.lat},${origin.location.lng}`);
   url.searchParams.set('destination', `${destination.location.lat},${destination.location.lng}`);
+
+  if (settings.useTrafficData && (settings.transportMode === 'car' || settings.transportMode === 'truck' || !settings.transportMode)) {
+    url.searchParams.set('departureTime', 'any');
+  }
 
   for (const wp of intermediates) {
     url.searchParams.append('via', `${wp.location.lat},${wp.location.lng}`);
@@ -98,66 +102,35 @@ async function callHereRouting(
   return data.routes[0].sections as HereSection[];
 }
 
-function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371e3; // metres
-  const φ1 = lat1 * Math.PI / 180;
-  const φ2 = lat2 * Math.PI / 180;
-  const Δφ = (lat2 - lat1) * Math.PI / 180;
-  const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
 function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAddress: string): RouteLeg {
   const { polyline: decoded } = decodeFlexPolyline(section.polyline);
   const points = decoded as [number, number][];
 
-  // HERE returns a single polyline for the entire section.
-  // To allow the trip planner to split days accurately, we break this polyline
-  // into artificial "steps" of max 50km.
-  const CHUNK_MAX_METERS = 50000;
-  const speedMps = section.summary.length > 0 ? section.summary.duration / section.summary.length : 0;
+  // We chunk the single section into ~20km steps to allow `splitLegBySteps` 
+  // in tripPlanner to correctly enforce max distance/duration limits.
+  const CHUNK_SIZE_M = 20000;
+  const numSteps = Math.max(1, Math.ceil(section.summary.length / CHUNK_SIZE_M));
+  const pointsPerStep = Math.ceil(points.length / numSteps);
+  const distPerStep = section.summary.length / numSteps;
+  const durPerStep = section.summary.duration / numSteps;
 
   const steps: RouteStep[] = [];
-  let currentPoints: [number, number][] = [points[0]];
-  let currentDist = 0;
-
-  for (let i = 1; i < points.length; i++) {
-    const p1 = points[i - 1];
-    const p2 = points[i];
-    const d = getDistanceMeters(p1[0], p1[1], p2[0], p2[1]);
-    
-    currentPoints.push(p2);
-    currentDist += d;
-
-    // Flush chunk if it exceeds limit or is the last point
-    if (currentDist >= CHUNK_MAX_METERS || i === points.length - 1) {
-      steps.push({
-        distanceMeters: Math.round(currentDist),
-        durationSeconds: Math.round(currentDist * speedMps),
-        startLocation: { lat: currentPoints[0][0], lng: currentPoints[0][1] },
-        endLocation: { lat: p2[0], lng: p2[1] },
-        encodedPolyline: encodeGooglePolyline(currentPoints),
-      });
-      // Start next chunk
-      currentPoints = [p2];
-      currentDist = 0;
+  for (let i = 0; i < numSteps; i++) {
+    const startIdx = i * pointsPerStep;
+    let endIdx = (i + 1) * pointsPerStep;
+    if (i === numSteps - 1 || endIdx >= points.length) {
+      endIdx = points.length - 1;
     }
-  }
 
-  // Handle case where polyline had 0 or 1 points
-  if (steps.length === 0) {
+    const chunkPoints = points.slice(startIdx, endIdx + 1);
+    if (chunkPoints.length < 2) continue;
+
     steps.push({
-      distanceMeters: section.summary.length,
-      durationSeconds: section.summary.duration,
-      startLocation: section.departure.place.location,
-      endLocation: section.arrival.place.location,
-      encodedPolyline: encodeGooglePolyline(points),
+      distanceMeters: distPerStep,
+      durationSeconds: durPerStep,
+      startLocation: { lat: chunkPoints[0][0], lng: chunkPoints[0][1] },
+      endLocation: { lat: chunkPoints[chunkPoints.length - 1][0], lng: chunkPoints[chunkPoints.length - 1][1] },
+      encodedPolyline: encodeGooglePolyline(chunkPoints),
     });
   }
 
@@ -168,8 +141,78 @@ function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAd
     endAddress,
     startLocation: section.departure.place.location,
     endLocation: section.arrival.place.location,
-    steps,
+    steps
   };
+}
+
+// ─── HERE Waypoints Sequence API ───────────────────────────────────────────────
+
+export async function callHereWaypointsSequence(
+  origin: Waypoint,
+  destination: Waypoint,
+  intermediates: Waypoint[],
+  settings: TripSettings
+): Promise<number[]> {
+  if (intermediates.length === 0) return [];
+
+  const url = new URL('https://wse.router.hereapi.com/v8/sequences');
+  url.searchParams.set('apiKey', API_KEY);
+
+  // Start and end are fixed
+  url.searchParams.set('start', `start;${origin.location.lat},${origin.location.lng}`);
+  url.searchParams.set('end', `end;${destination.location.lat},${destination.location.lng}`);
+
+  for (let i = 0; i < intermediates.length; i++) {
+    const wp = intermediates[i];
+    url.searchParams.append('destination', `wp${i};${wp.location.lat},${wp.location.lng}`);
+  }
+
+  url.searchParams.set('mode', `fastest;${settings.transportMode || 'car'}`);
+
+  const response = await fetch(url.toString());
+  const data = await response.json();
+
+  if (!response.ok || !data.results || data.results.length === 0) {
+    console.warn('HERE Waypoints Sequence failed:', data);
+    return intermediates.map((_, i) => i); // return original order on failure
+  }
+
+  const waypoints = data.results[0].waypoints;
+  // Extract intermediate order (skip first and last which are start/end)
+  const orderedIds = waypoints.slice(1, -1).map((wp: { id: string }) => wp.id);
+
+  const order = orderedIds.map((id: string) => parseInt(id.replace('wp', ''), 10));
+  return order;
+}
+
+// ─── HERE Isoline Routing API ────────────────────────────────────────────────
+
+export async function callHereIsoline(
+  lat: number,
+  lng: number,
+  rangeMins: number,
+  transportMode: string = 'car'
+): Promise<{ lat: number; lng: number }[]> {
+  const url = new URL('https://isoline.router.hereapi.com/v8/calculateroute');
+  url.searchParams.set('apiKey', API_KEY);
+  url.searchParams.set('transportMode', transportMode);
+  url.searchParams.set('origin', `${lat},${lng}`);
+  url.searchParams.set('range[type]', 'time');
+  url.searchParams.set('range[values]', String(rangeMins * 60)); // seconds
+  url.searchParams.set('shape[maxPoints]', '100'); // reasonable fidelity
+
+  try {
+    const response = await fetch(url.toString());
+    const data = await response.json();
+    if (!response.ok || !data.isolines?.[0]) return [];
+
+    const polylineEncoded = data.isolines[0].polygons[0].outer;
+    const { polyline: decoded } = decodeFlexPolyline(polylineEncoded);
+    return (decoded as [number, number][]).map(([lat, lng]) => ({ lat, lng }));
+  } catch (err) {
+    console.error('Isoline error:', err);
+    return [];
+  }
 }
 
 // ─── HERE Browse API ─────────────────────────────────────────────────────────
