@@ -251,8 +251,8 @@ export default function Sidebar({
             onToggleRestDay={onToggleRestDay}
             onSetDayEnd={onSetDayEnd}
             onAddOvernightStop={onAddOvernightStop}
-            // Only enable optimize when using Google provider
-            onOptimizeRoute={mapProvider === 'google' ? onOptimizeRoute : undefined}
+            // Enable optimize for both Google and HERE
+            onOptimizeRoute={onOptimizeRoute}
             isPlanning={isPlanning}
             maxDistanceKm={settings.maxDistancePerDayKm}
             maxDrivingMinutes={settings.maxDrivingMinutesPerDay}

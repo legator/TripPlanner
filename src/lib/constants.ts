@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: TripSettings = {
   fuelPricePerLiter: 1.80,
   fuelEfficiencyLPer100km: 8.0,
   useTrafficData: true,
+  transportMode: 'car',
 };
 
 export const FUEL_BUFFER_FACTOR = 0.7; // refuel at 70% of tank range

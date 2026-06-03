@@ -59,6 +59,8 @@ export interface TripSettings {
   fuelEfficiencyLPer100km: number;
   /** If true, request traffic-aware ETAs from the routing API (Google only, future dates only) */
   useTrafficData: boolean;
+  /** Primary mode of transport for routing (e.g., car, pedestrian, bicycle, scooter, truck) */
+  transportMode: 'car' | 'pedestrian' | 'bicycle' | 'scooter' | 'truck' | 'bus';
 }
 
 export type ScheduleEventType =

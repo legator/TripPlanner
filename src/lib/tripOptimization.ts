@@ -1,4 +1,5 @@
 import { DayPlan, DaySegment, TripSettings } from './types';
+import { callHereWaypointsSequence } from './providers/here';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!;
 
@@ -23,12 +24,13 @@ interface DirectionsRoute {
 }
 
 /**
- * Optimize the route for a specific day using Google Directions API
+ * Optimize the route for a specific day using Google Directions API or HERE Waypoints Sequence API
  * Returns optimized segments in the best order
  */
 export async function optimizeDayRoute(
   day: DayPlan,
-  settings: TripSettings
+  settings: TripSettings,
+  provider: 'google' | 'here' = 'google'
 ): Promise<DaySegment[]> {
   if (day.isRestDay || day.segments.length === 0) {
     return day.segments;
@@ -44,6 +46,67 @@ export async function optimizeDayRoute(
   const endLocation = day.segments[day.segments.length - 1].endLocation;
   const intermediateLocations = day.segments.map((seg) => seg.endLocation).slice(0, -1);
 
+  // If provider is HERE, use the HERE Waypoints Sequence API
+  if (provider === 'here') {
+    console.log('[optimizeDayRoute] Requesting optimization from HERE for', day.segments.length, 'segments');
+    
+    // Convert to Waypoint interface
+    const toWaypoint = (loc: any, i: number) => ({
+      id: `wp_${i}`,
+      name: `Waypoint ${i}`,
+      address: '',
+      location: loc
+    });
+    
+    const originWp = toWaypoint(startLocation, 0);
+    const destWp = toWaypoint(endLocation, intermediateLocations.length + 1);
+    const interWps = intermediateLocations.map((loc, i) => toWaypoint(loc, i + 1));
+    
+    const optimizedOrder = await callHereWaypointsSequence(originWp, destWp, interWps, settings);
+    
+    if (!optimizedOrder || optimizedOrder.length === 0) {
+      return day.segments; // Fallback
+    }
+
+    // Reorder the intermediates based on optimizedOrder
+    const newIntermediates = optimizedOrder.map(idx => interWps[idx]);
+    
+    // Now we must call the regular HERE routing to get the new distances, times, and polylines
+    // for this new order!
+    // We can't import hereProvider here directly due to circular deps maybe? 
+    // Let's just import callHereRouting if we can, or just do the fetch here. 
+    // Actually, tripOptimization doesn't have circular deps with providers/here.ts.
+    // Let's import hereProvider.
+    const { hereProvider } = require('./providers/here');
+    const result = await hereProvider.getRoute(originWp, destWp, newIntermediates, settings);
+    
+    const optimizedSegments: DaySegment[] = [];
+    
+    // Original segments have startName and endName. We need to preserve them.
+    // The new route legs map 1:1 with segments
+    const allNames = [
+      day.segments[0].startName,
+      ...optimizedOrder.map(idx => day.segments[idx].endName),
+      day.segments[day.segments.length - 1].endName
+    ];
+
+    for (let i = 0; i < result.legs.length; i++) {
+      const leg = result.legs[i];
+      optimizedSegments.push({
+        distanceKm: leg.distanceMeters / 1000,
+        durationMinutes: Math.round(leg.durationSeconds / 60),
+        startName: allNames[i],
+        startLocation: leg.startLocation,
+        endName: allNames[i + 1],
+        endLocation: leg.endLocation,
+        polylineSegments: leg.steps.map((s: any) => s.encodedPolyline),
+      });
+    }
+
+    return optimizedSegments;
+  }
+
+  // Fallback to Google
   const waypoints = [
     startLocation,
     ...intermediateLocations,

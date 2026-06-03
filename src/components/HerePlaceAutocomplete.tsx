@@ -44,8 +44,9 @@ export default function HerePlaceAutocomplete({
       url.searchParams.set('q', q);
       url.searchParams.set('lang', 'en');
       url.searchParams.set('limit', '6');
-      // Bias toward results with a known position
-      url.searchParams.set('resultTypes', 'place,locality,administrativeArea');
+      // HERE Autosuggest v1 requires a spatial context (`at` or `in`).
+      // We'll use a default center (Europe) if we don't have user's location.
+      url.searchParams.set('at', '48.5,15.0');
 
       const res = await fetch(url.toString());
       const data = await res.json();

@@ -12,7 +12,9 @@ import { decode as decodeFlexPolyline } from '@here/flexpolyline';
 import { Waypoint, TripSettings } from '../types';
 import { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';
 
-const API_KEY = process.env.HERE_API_KEY!;
+import { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';
+
+const API_KEY = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY!;
 
 // ─── Google Polyline encoder (needed to re-encode HERE flexible polylines) ───
 
@@ -70,10 +72,14 @@ async function callHereRouting(
 ): Promise<HereSection[]> {
   const url = new URL('https://router.hereapi.com/v8/routes');
   url.searchParams.set('apiKey', API_KEY);
-  url.searchParams.set('transportMode', 'car');
+  url.searchParams.set('transportMode', settings.transportMode || 'car');
   url.searchParams.set('return', 'polyline,summary');
   url.searchParams.set('origin', `${origin.location.lat},${origin.location.lng}`);
   url.searchParams.set('destination', `${destination.location.lat},${destination.location.lng}`);
+
+  if (settings.useTrafficData && (settings.transportMode === 'car' || settings.transportMode === 'truck' || !settings.transportMode)) {
+    url.searchParams.set('departureTime', 'any');
+  }
 
   for (const wp of intermediates) {
     url.searchParams.append('via', `${wp.location.lat},${wp.location.lng}`);
@@ -123,6 +129,76 @@ function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAd
     endLocation: section.arrival.place.location,
     steps: [step],
   };
+}
+
+// ─── HERE Waypoints Sequence API ───────────────────────────────────────────────
+
+export async function callHereWaypointsSequence(
+  origin: Waypoint,
+  destination: Waypoint,
+  intermediates: Waypoint[],
+  settings: TripSettings
+): Promise<number[]> {
+  if (intermediates.length === 0) return [];
+  
+  const url = new URL('https://wse.router.hereapi.com/v8/sequences');
+  url.searchParams.set('apiKey', API_KEY);
+  
+  // Start and end are fixed
+  url.searchParams.set('start', `start;${origin.location.lat},${origin.location.lng}`);
+  url.searchParams.set('end', `end;${destination.location.lat},${destination.location.lng}`);
+  
+  for (let i = 0; i < intermediates.length; i++) {
+    const wp = intermediates[i];
+    url.searchParams.append('destination', `wp${i};${wp.location.lat},${wp.location.lng}`);
+  }
+  
+  url.searchParams.set('mode', `fastest;${settings.transportMode || 'car'}`);
+  
+  const response = await fetch(url.toString());
+  const data = await response.json();
+  
+  if (!response.ok || !data.results || data.results.length === 0) {
+    console.warn('HERE Waypoints Sequence failed:', data);
+    return intermediates.map((_, i) => i); // return original order on failure
+  }
+  
+  const waypoints = data.results[0].waypoints;
+  // Extract intermediate order (skip first and last which are start/end)
+  const orderedIds = waypoints.slice(1, -1).map((wp: any) => wp.id as string);
+  
+  const order = orderedIds.map(id => parseInt(id.replace('wp', ''), 10));
+  return order;
+}
+
+// ─── HERE Isoline Routing API ────────────────────────────────────────────────
+
+export async function callHereIsoline(
+  lat: number,
+  lng: number,
+  rangeMins: number,
+  transportMode: string = 'car'
+): Promise<{ lat: number; lng: number }[]> {
+  const url = new URL('https://isoline.router.hereapi.com/v8/calculateroute');
+  url.searchParams.set('apiKey', API_KEY);
+  url.searchParams.set('transportMode', transportMode);
+  url.searchParams.set('origin', `${lat},${lng}`);
+  url.searchParams.set('range[type]', 'time');
+  url.searchParams.set('range[values]', String(rangeMins * 60)); // seconds
+  url.searchParams.set('shape[maxPoints]', '100'); // reasonable fidelity
+
+  try {
+    const response = await fetch(url.toString());
+    const data = await response.json();
+    if (!response.ok || !data.isolines?.[0]) return [];
+
+    const polylineEncoded = data.isolines[0].polygons[0].outer;
+    const { polyline: decoded } = decodeFlexPolyline(polylineEncoded);
+    return (decoded as [number, number][]).map(([lat, lng]) => ({ lat, lng }));
+  } catch (err) {
+    console.error('Isoline error:', err);
+    return [];
+  }
 }
 
 // ─── HERE Browse API ─────────────────────────────────────────────────────────

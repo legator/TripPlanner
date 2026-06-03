@@ -171,7 +171,7 @@ export default function Home() {
 
     try {
       const day = tripPlan.days[dayIndex];
-      const optimizedSegments = await optimizeDayRoute(day, settings);
+      const optimizedSegments = await optimizeDayRoute(day, settings, mapProvider || 'google');
 
       setTripPlan((prev) =>
         prev
