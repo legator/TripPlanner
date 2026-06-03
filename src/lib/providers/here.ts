@@ -108,17 +108,33 @@ function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAd
   const { polyline: decoded } = decodeFlexPolyline(section.polyline);
   const points = decoded as [number, number][];
 
-  // Split into "steps" — for HERE we create a single step per section
-  // (no step-level detail in the basic polyline return)
-  const googleEncoded = encodeGooglePolyline(points);
+  // We chunk the single section into ~20km steps to allow `splitLegBySteps` 
+  // in tripPlanner to correctly enforce max distance/duration limits.
+  const CHUNK_SIZE_M = 20000; 
+  const numSteps = Math.max(1, Math.ceil(section.summary.length / CHUNK_SIZE_M));
+  const pointsPerStep = Math.ceil(points.length / numSteps);
+  const distPerStep = section.summary.length / numSteps;
+  const durPerStep = section.summary.duration / numSteps;
 
-  const step: RouteStep = {
-    distanceMeters: section.summary.length,
-    durationSeconds: section.summary.duration,
-    startLocation: section.departure.place.location,
-    endLocation: section.arrival.place.location,
-    encodedPolyline: googleEncoded,
-  };
+  const steps: RouteStep[] = [];
+  for (let i = 0; i < numSteps; i++) {
+    const startIdx = i * pointsPerStep;
+    let endIdx = (i + 1) * pointsPerStep;
+    if (i === numSteps - 1 || endIdx >= points.length) {
+      endIdx = points.length - 1;
+    }
+
+    const chunkPoints = points.slice(startIdx, endIdx + 1);
+    if (chunkPoints.length < 2) continue;
+
+    steps.push({
+      distanceMeters: distPerStep,
+      durationSeconds: durPerStep,
+      startLocation: { lat: chunkPoints[0][0], lng: chunkPoints[0][1] },
+      endLocation: { lat: chunkPoints[chunkPoints.length - 1][0], lng: chunkPoints[chunkPoints.length - 1][1] },
+      encodedPolyline: encodeGooglePolyline(chunkPoints),
+    });
+  }
 
   return {
     distanceMeters: section.summary.length,
@@ -127,7 +143,7 @@ function hereSectionToRouteLeg(section: HereSection, startAddress: string, endAd
     endAddress,
     startLocation: section.departure.place.location,
     endLocation: section.arrival.place.location,
-    steps: [step],
+    steps,
   };
 }
 

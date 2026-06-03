@@ -39,15 +39,18 @@ export async function fetchWeather(
 
   const url = new URL('https://weather.hereapi.com/v3/report');
   url.searchParams.set('apiKey', API_KEY);
-  url.searchParams.set('products', 'forecast_7days_simple');
+  url.searchParams.set('products', 'forecast7daysSimple');
   url.searchParams.set('location', `${lat},${lng}`);
 
   try {
     const res = await fetch(url.toString());
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.error('Weather fetch error:', res.status, await res.text());
+      return [];
+    }
     const data = await res.json();
     
-    const forecasts = data.places?.[0]?.forecasts;
+    const forecasts = data.places?.[0]?.dailyForecasts?.[0]?.forecasts;
     if (!forecasts) return [];
 
     // Filter forecasts by requested date range
@@ -65,19 +68,21 @@ export async function fetchWeather(
         // Map HERE weather icon ID to WMO roughly
         // 1-2: sunny, 3-4: partly cloudy, 5-6: cloudy, 7-14: rain, 15-18: snow
         let code = 0;
-        if (f.icon >= 3 && f.icon <= 4) code = 2; // partly cloudy
-        else if (f.icon >= 5 && f.icon <= 6) code = 3; // overcast
-        else if (f.icon >= 7 && f.icon <= 14) code = 61; // rain
-        else if (f.icon >= 15 && f.icon <= 18) code = 71; // snow
-        else if (f.icon >= 19 && f.icon <= 22) code = 95; // thunderstorm
-        else if (f.icon >= 23) code = 45; // fog
+        const icon = f.iconId || 0;
+        if (icon >= 3 && icon <= 4) code = 2; // partly cloudy
+        else if (icon >= 5 && icon <= 6) code = 3; // overcast
+        else if (icon >= 7 && icon <= 14) code = 61; // rain
+        else if (icon >= 15 && icon <= 18) code = 71; // snow
+        else if (icon >= 19 && icon <= 22) code = 95; // thunderstorm
+        else if (icon >= 23 && icon <= 28) code = 45; // fog / misc
+        else if (icon >= 29 && icon <= 34) code = 82; // showers
         
         results.push({
           date: fDate,
-          tempMaxC: Math.round(f.highTemperature),
-          tempMinC: Math.round(f.lowTemperature),
-          precipitationMm: f.precipitationProbability ?? 0, // HERE simple doesn't always give mm, use prob
-          windspeedKmh: Math.round(f.windSpeed),
+          tempMaxC: Math.round(Number(f.highTemperature || 0)),
+          tempMinC: Math.round(Number(f.lowTemperature || 0)),
+          precipitationMm: Number(f.precipitationProbability ?? 0), // HERE simple doesn't always give mm, use prob
+          windspeedKmh: Math.round(Number(f.windSpeed || 0)),
           weatherCode: code,
         });
       }
