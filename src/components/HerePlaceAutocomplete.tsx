@@ -39,13 +39,13 @@ export default function HerePlaceAutocomplete({
     }
     setIsLoading(true);
     try {
-      const url = new URL('https://autosuggest.search.hereapi.com/v1/autosuggest');
+      const url = new URL('https://autocomplete.search.hereapi.com/v1/autocomplete');
       url.searchParams.set('apiKey', HERE_API_KEY);
       url.searchParams.set('q', q);
       url.searchParams.set('lang', 'en');
       url.searchParams.set('limit', '6');
-      // Bias toward results with a known position
-      url.searchParams.set('resultTypes', 'place,locality,administrativeArea');
+      // Bias toward areas and cities
+      url.searchParams.set('types', 'area,city');
 
       const res = await fetch(url.toString());
       const data = await res.json();
