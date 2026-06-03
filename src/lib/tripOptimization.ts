@@ -1,5 +1,5 @@
 import { DayPlan, DaySegment, TripSettings } from './types';
-import { callHereWaypointsSequence } from './providers/here';
+import { callHereWaypointsSequence, hereProvider } from './providers/here';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!;
 
@@ -51,7 +51,7 @@ export async function optimizeDayRoute(
     console.log('[optimizeDayRoute] Requesting optimization from HERE for', day.segments.length, 'segments');
     
     // Convert to Waypoint interface
-    const toWaypoint = (loc: any, i: number) => ({
+    const toWaypoint = (loc: { lat: number; lng: number }, i: number) => ({
       id: `wp_${i}`,
       name: `Waypoint ${i}`,
       address: '',
@@ -77,7 +77,7 @@ export async function optimizeDayRoute(
     // Let's just import callHereRouting if we can, or just do the fetch here. 
     // Actually, tripOptimization doesn't have circular deps with providers/here.ts.
     // Let's import hereProvider.
-    const { hereProvider } = require('./providers/here');
+    // Let's import hereProvider at the top of the file.
     const result = await hereProvider.getRoute(originWp, destWp, newIntermediates, settings);
     
     const optimizedSegments: DaySegment[] = [];
@@ -99,7 +99,7 @@ export async function optimizeDayRoute(
         startLocation: leg.startLocation,
         endName: allNames[i + 1],
         endLocation: leg.endLocation,
-        polylineSegments: leg.steps.map((s: any) => s.encodedPolyline),
+        polylineSegments: leg.steps.map((s: { encodedPolyline: string }) => s.encodedPolyline),
       });
     }
 

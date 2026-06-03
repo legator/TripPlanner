@@ -206,6 +206,7 @@ export default function Sidebar({
                 disabled={isPlanning}
                 currentMapProvider={mapProvider}
                 onChangeMapProvider={onChangeMapProvider}
+                startLocationName={waypoints[0]?.address || waypoints[0]?.name}
               />
             )}
 

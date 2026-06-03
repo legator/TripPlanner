@@ -33,7 +33,9 @@ export default function HereMapView({
   const onAddWaypointRef = useRef(onAddWaypoint);
   const [showTraffic, setShowTraffic] = useState(false);
   const [isolinePoints, setIsolinePoints] = useState<{lat: number, lng: number}[] | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const trafficLayerRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const isolinePolygonRef = useRef<any>(null);
 
   useEffect(() => {

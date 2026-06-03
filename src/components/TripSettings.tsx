@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import { TripSettings } from '@/lib/types';
 import { MapProviderChoice } from './MapProviderPicker';
 
@@ -9,7 +11,23 @@ interface TripSettingsProps {
   disabled?: boolean;
   currentMapProvider?: MapProviderChoice;
   onChangeMapProvider?: () => void;
+  startLocationName?: string;
 }
+
+const COUNTRY_MAP: Record<string, string> = {
+  germany: 'de',
+  france: 'fr',
+  spain: 'es',
+  netherlands: 'nl',
+  austria: 'at',
+  italy: 'it',
+  greece: 'gr',
+  croatia: 'hr',
+  portugal: 'pt',
+  'united kingdom': 'uk',
+  belgium: 'be',
+  luxembourg: 'lu',
+};
 
 export default function TripSettingsPanel({
   settings,
@@ -17,9 +35,44 @@ export default function TripSettingsPanel({
   disabled = false,
   currentMapProvider,
   onChangeMapProvider,
+  startLocationName,
 }: TripSettingsProps) {
+  const [isFetchingFuel, setIsFetchingFuel] = useState(false);
   const update = (partial: Partial<TripSettings>) => {
     onChange({ ...settings, ...partial });
+  };
+
+  const handleAutoFillFuel = async () => {
+    setIsFetchingFuel(true);
+    try {
+      const res = await fetch('/api/fuel');
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      // Try to find the country in the start location string
+      const locStr = (startLocationName || '').toLowerCase();
+      let matchedCode = 'de'; // default to Germany if no match
+
+      for (const [countryName, code] of Object.entries(COUNTRY_MAP)) {
+        if (locStr.includes(countryName)) {
+          matchedCode = code;
+          break;
+        }
+      }
+
+      const countryData = data.data[matchedCode];
+      if (countryData) {
+        update({ fuelPricePerLiter: countryData.euro95 });
+        alert(`Detected ${matchedCode.toUpperCase()} prices. Updated Euro95 to €${countryData.euro95}`);
+      } else {
+        alert('Could not detect fuel prices for your region.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Failed to fetch real-time fuel prices.');
+    } finally {
+      setIsFetchingFuel(false);
+    }
   };
 
   return (
@@ -240,7 +293,7 @@ export default function TripSettingsPanel({
             <select
               value={settings.transportMode ?? 'car'}
               onChange={(e) =>
-                update({ transportMode: e.target.value as any })
+                update({ transportMode: e.target.value as TripSettings['transportMode'] })
               }
               disabled={disabled}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg 
@@ -310,9 +363,19 @@ export default function TripSettingsPanel({
         </h4>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Price per litre
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-gray-600">
+                Price per litre
+              </label>
+              <button
+                type="button"
+                onClick={handleAutoFillFuel}
+                disabled={disabled || isFetchingFuel}
+                className="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-0.5 rounded font-medium disabled:opacity-50 transition-colors"
+              >
+                {isFetchingFuel ? 'Fetching...' : 'Auto-fill'}
+              </button>
+            </div>
             <input
               type="number"
               value={settings.fuelPricePerLiter ?? 1.8}
