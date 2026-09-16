@@ -6,6 +6,7 @@ import { DayPlan, Place } from '@/lib/types';
 import { DAY_COLORS, MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/lib/constants';
 import { Waypoint } from '@/lib/types';
 import { LiveDrivingPosition, getCurrentCoordinates, reverseGeocodeCoordinates } from '@/lib/location';
+import { generateUUID } from '@/lib/uuid';
 
 interface MapViewProps {
   waypoints: Waypoint[];
@@ -113,7 +114,7 @@ export default function MapView({
         btn.onmouseout = () => (btn.style.background = '#2563eb');
         btn.addEventListener('click', () => {
           onAddWaypointRef.current?.({
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             name,
             address,
             location: { lat, lng },
@@ -172,7 +173,7 @@ export default function MapView({
 
       const geocoded = await reverseGeocodeCoordinates(coords.lat, coords.lng, 'google');
       const wp: Waypoint = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         name: geocoded.name || 'Current Location',
         address: geocoded.address || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`,
         location: pos,

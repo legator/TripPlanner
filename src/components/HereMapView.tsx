@@ -7,6 +7,7 @@ import { DAY_COLORS, MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/lib/constant
 import { decodePolyline } from '@/lib/tripGpxExport';
 import { callHereIsoline } from '@/lib/providers/here';
 import { LiveDrivingPosition, getCurrentCoordinates, reverseGeocodeCoordinates } from '@/lib/location';
+import { generateUUID } from '@/lib/uuid';
 
 const HERE_API_KEY = process.env.NEXT_PUBLIC_HERE_API_KEY || '';
 
@@ -134,14 +135,14 @@ export default function HereMapView({
           item?.address?.city || item?.address?.county || address.split(',')[0];
 
         onAddWaypointRef.current?.({
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name,
           address,
           location: { lat, lng },
         });
       } catch {
         onAddWaypointRef.current?.({
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
           address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
           location: { lat, lng },
@@ -352,7 +353,7 @@ export default function HereMapView({
 
       const geocoded = await reverseGeocodeCoordinates(coords.lat, coords.lng, 'here');
       const wp: Waypoint = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         name: geocoded.name || 'Current Location',
         address: geocoded.address || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`,
         location: { lat: coords.lat, lng: coords.lng },

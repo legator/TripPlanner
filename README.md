@@ -155,6 +155,37 @@ A modern, full-featured road-trip itinerary planner and live in-car driving comp
 
 ---
 
+## 📱 Mobile App (Android & iOS)
+
+TripPlanner uses **Capacitor** to build native mobile apps for **Android** and **iOS** from the same codebase, featuring native GPS tracking, screen stay-awake, and haptic feedback.
+
+### Android Development
+1. Ensure **Android Studio** is installed.
+2. Open the project in Android Studio:
+   ```bash
+   npm run cap:android
+   ```
+3. In Android Studio:
+   - Connect your Android device via USB (with USB Debugging enabled) or start an Android Virtual Device (AVD).
+   - Click **Run (▶)** to install and launch the debug app.
+   - To build an APK for testing or Google Play release: **Build** → **Build Bundle(s) / APK(s)** → **Build APK(s)**.
+
+### iOS Development (macOS)
+1. Ensure **Xcode** and CocoaPods are installed on macOS.
+2. Open the project in Xcode:
+   ```bash
+   npm run cap:ios
+   ```
+3. In Xcode, select your simulator or plugged-in iPhone and click **Run (▶)**.
+
+### Syncing Native Projects
+Whenever you update plugins, Capacitor configuration, or web assets:
+```bash
+npm run cap:sync
+```
+
+---
+
 ## 🧪 Testing & Verification
 
 ```bash

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useGoogleMaps } from './GoogleMapsProvider';
 import { Waypoint } from '@/lib/types';
+import { generateUUID } from '@/lib/uuid';
 
 interface PlaceAutocompleteProps {
   onPlaceSelect: (waypoint: Waypoint) => void;
@@ -52,7 +53,7 @@ export default function PlaceAutocomplete({
         if (!location) return;
 
         const waypoint: Waypoint = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: place.displayName || place.formattedAddress || 'Unknown',
           address: place.formattedAddress || '',
           location: {

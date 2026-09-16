@@ -1,5 +1,8 @@
+import { Capacitor } from '@capacitor/core';
+import { KeepAwake } from '@capacitor-community/keep-awake';
+
 /**
- * Utility to keep the screen awake using the Screen Wake Lock API.
+ * Utility to keep the screen awake using native KeepAwake or the Screen Wake Lock API.
  * Useful when using the app as an in-car GPS navigation companion.
  */
 
@@ -11,8 +14,22 @@ export interface WakeLockSentinelLike {
 }
 
 let activeWakeLock: WakeLockSentinelLike | null = null;
+let isNativeKeepAwakeActive = false;
 
 export async function requestScreenWakeLock(): Promise<boolean> {
+  // Native Android/iOS via Capacitor KeepAwake
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await KeepAwake.keepAwake();
+      isNativeKeepAwakeActive = true;
+      return true;
+    } catch (err) {
+      console.warn('Could not acquire native screen keep-awake:', err);
+      return false;
+    }
+  }
+
+  // Browser Screen Wake Lock API fallback
   if (typeof window === 'undefined' || !('wakeLock' in navigator)) {
     return false;
   }
@@ -34,6 +51,19 @@ export async function requestScreenWakeLock(): Promise<boolean> {
 }
 
 export async function releaseScreenWakeLock(): Promise<void> {
+  // Native Android/iOS release
+  if (Capacitor.isNativePlatform() && isNativeKeepAwakeActive) {
+    try {
+      await KeepAwake.allowSleep();
+    } catch {
+      // ignore
+    } finally {
+      isNativeKeepAwakeActive = false;
+    }
+    return;
+  }
+
+  // Browser sentinel release
   if (activeWakeLock && !activeWakeLock.released) {
     try {
       await activeWakeLock.release();

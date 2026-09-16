@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Waypoint } from '@/lib/types';
+import { generateUUID } from '@/lib/uuid';
 
 const HERE_API_KEY = process.env.NEXT_PUBLIC_HERE_API_KEY || '';
 
@@ -87,7 +88,7 @@ export default function HerePlaceAutocomplete({
     // If the suggestion has a position, use it directly
     if (suggestion.position) {
       onPlaceSelect({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         name: suggestion.title,
         address: suggestion.address.label,
         location: { lat: suggestion.position.lat, lng: suggestion.position.lng },
@@ -105,7 +106,7 @@ export default function HerePlaceAutocomplete({
       const data = await res.json();
       if (data.position) {
         onPlaceSelect({
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: data.title || suggestion.title,
           address: data.address?.label || suggestion.address.label,
           location: { lat: data.position.lat, lng: data.position.lng },

@@ -19,6 +19,7 @@ import DrivingHUD from '@/components/DrivingHUD';
 import { LiveDrivingPosition, watchCurrentPosition } from '@/lib/location';
 import { findActiveTripDayAndTarget } from '@/lib/routeProgress';
 import { requestScreenWakeLock, releaseScreenWakeLock } from '@/lib/wakeLock';
+import { generateUUID } from '@/lib/uuid';
 import { format } from 'date-fns';
 import type { UserEdits } from '@/lib/tripPlanEditor';
 import type { SavedTrip } from '@/lib/savedTrips';
@@ -399,14 +400,14 @@ export default function Home() {
             if (d.isRestDay) continue;
             for (const ms of d.mainStops) {
               remainingStops.push({
-                id: crypto.randomUUID(),
+                id: generateUUID(),
                 name: ms.name,
                 address: ms.name,
                 location: ms.location,
               });
             }
             remainingStops.push({
-              id: crypto.randomUUID(),
+              id: generateUUID(),
               name: d.endLocation.name,
               address: d.endLocation.name,
               location: d.endLocation.location,
