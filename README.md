@@ -1,174 +1,175 @@
 # Trip Planner 🚗
 
-A smart road-trip itinerary planner built with **Next.js 14**, **TypeScript**, **Tailwind CSS**, and the **Google Maps Platform**.
+A modern, full-featured road-trip itinerary planner and live in-car driving companion built with **Next.js 14 (App Router)**, **TypeScript**, **Tailwind CSS**, **Google Maps Platform**, and **HERE Technologies**.
 
-## Features
+---
 
-### Planning
-- **Route Optimization** — Multi-waypoint routing via Google Directions API with stop reordering
-- **Daily Itinerary** — Splits trips into manageable daily segments based on max driving time/distance
-- **One-Way Trips** — Support for point-to-point routes (no return leg)
-- **Rest Days** — Toggle any day as a rest day; shift day boundaries interactively
-- **Scheduled Itinerary** — Per-day timed schedule (departure, driving, sightseeing, check-in)
+## 🌟 Features Overview
 
-### Place Discovery
-- **Hotel Suggestions** — Finds lodging near each day's endpoint
-- **Gas Station Finder** — Recommends fuel stops based on your vehicle's fuel range
-- **EV Charging Stations** — Locates charging stops along the route for electric vehicles
-- **Attraction Discovery** — Highlights tourist attractions near your route
-- **Restaurant Suggestions** — Finds places to eat along the way
-- **Campgrounds** — Surfaces nearby campgrounds as an alternative to hotels
+### 1. 🚗 Live In-App "Driving Follow" Mode
+- **Hands-Free In-Car HUD**: Distraction-free navigation overlay engineered for mobile car dashboard mounts (both vertical portrait and horizontal landscape).
+- **Smooth 3D Camera Follow**: Automatically tracks GPS position with 3D camera pitch (45°–55°) and dynamic bearing/heading rotation in both **HERE Maps** and **Google Maps**.
+- **Digital Speedometer & Compass**: High-visibility real-time speed display (km/h) with compass bearing and cardinal direction indicators.
+- **Screen Wake Lock**: Automatically prevents device screens from dimming or locking while driving via the native `navigator.wakeLock` API.
+- **External Navigation App Handoff**: One-tap handoff to **Google Maps**, **Apple Maps**, or **Waze** with direct routing to the upcoming waypoint.
 
-### Cost & Fuel
-- **Fuel Cost Estimator** — Calculates estimated trip fuel cost from price/litre and efficiency (L/100 km)
-- **Trip Cost Summary** — Shows total estimated fuel cost across all driving days
+### 2. 🧭 Dynamic Route Progress & Waypoint Auto-Advancing
+- **GPS Day Auto-Detection**: Automatically identifies which day of a multi-day trip the vehicle is on based on live coordinates, eliminating getting stuck on Day 1 when already midway through the trip.
+- **Polyline-Based Stop Tracking**: Projects vehicle coordinates onto the route polyline to accurately determine whether intermediate waypoints have been driven past or bypassed.
+- **Immediate Target Metrics**: Displays real-time road driving distance and ETA to the *immediate next upcoming stop* rather than full-day distance.
+- **Auto-Advancement on Pass**: Automatically advances to the next point upon passing a waypoint with a toast confirmation (`✅ Passed [Stop] • Next: [Next Stop]`).
+- **Arrival Status**: Displays a prominent `Here! / Arrived` status when within 250 meters of the destination.
+- **Automatic Day Transition**: Automatically advances to the next day when the final overnight stop is reached.
+- **Manual Steppers with 1-Tap Auto Reset**: Allows manual browsing (`◀ Day X of Y ▶` and `◀ Next: [Stop] ▶`) with a pulsing `Auto ↺` button to snap back to live GPS tracking.
 
-### Export & Share
-- **GPX Export** — For GPS devices and navigation apps
-- **KML Export** — For Google Earth and Google Maps import
-- **CSV Export** — Settings summary + detailed day-by-day itinerary
-- **iCal Export** — Import your trip schedule into any calendar app
-- **Share via URL** — Encodes the full trip plan into a shareable link (copied to clipboard)
+### 3. ⛽ Quick Stops Along Route
+- **One-Tap Amenities**: Scans forward along the driving route for:
+  - ⛽ **Gas Stations** (with distances and driving times)
+  - 🍽️ **Restaurants & Cafes**
+  - ☕ **Rest Stops & Relaxation Areas**
+- **Instant Actions**: Center on map, navigate directly, or add any discovered place directly to the active trip itinerary.
 
-### UI & UX
-- **Interactive Map** — Color-coded daily routes, markers for all POIs, click-to-add waypoints
-- **Dark Mode** — Toggle dark/light theme (preference persisted across sessions)
-- **Auto-Save** — Waypoints, settings, and plan auto-saved to localStorage; restored on reload
-- **Error Boundaries** — Graceful recovery from unexpected rendering errors
-- **Rate Limiting** — API endpoint capped at 10 requests/minute per IP
+### 4. 🚦 HERE Traffic API v7 Integration
+- **Live Traffic Vector Flow**: Real-time traffic speed and congestion visualization on HERE Maps.
+- **Incident Markers**: Live map markers for road closures (⛔), accidents (💥), construction/roadwork (🚧), hazards (⚠️), and heavy congestion (🛑).
+- **Smart Corridor Splitting**: Automatically divides multi-day routes exceeding 500 km into parallel corridor queries for seamless coverage across entire continents.
+- **Driving Hazard Alerts**: In-car HUD banner alerts the driver to road closures or critical incidents within 12 km ahead on the route.
+- **Traffic Drawer**: Interactive incident list sorted by proximity with details on affected road length, delays, and scheduled closures.
 
-## Tech Stack
+### 5. 🗺️ Multi-Provider Support (Google Maps & HERE)
+- **Map Provider Picker**: Switch seamlessly between **Google Maps Platform** and **HERE Technologies**.
+- Provider abstraction covers:
+  - Vector and raster maps
+  - Route calculation & multi-stop polyline rendering
+  - Geocoding and reverse geocoding
+  - Place autocomplete and POI discovery
+
+### 6. 📱 Mobile-First Responsive Design
+- **Dual-Mode Mobile Layout**: Seamless thumb-friendly switching between Itinerary (`[📋 Itinerary]`) and Full-Screen Map (`[🗺️ Map]` / `[🚗 Drive]`).
+- **Safe-Area Inset Support**: Full layout awareness (`safe-pt`, `safe-pb`) for phone notches, dynamic islands, and system gesture bars.
+- **Adaptive HUD Constraints**: Responsive layouts specifically tuned for phones in both portrait and landscape car mounts.
+
+### 7. 📅 Smart Trip Planning & Editing
+- **Intelligent Day Splitting**: Groups driving legs into realistic daily segments based on user-configured driving time and distance limits.
+- **Interactive Itinerary Customization**:
+  - Insert rest days (no driving)
+  - Re-order stops and shift day boundaries interactively
+  - Insert custom overnight stays
+  - Re-optimize route order
+- **Scheduled Itinerary**: Detailed daily timelines with check-out, driving legs, meal stops, sightseeing time, and hotel check-in.
+- **Weather Forecasts**: Integrated multi-day forecasts along each stop via **Open-Meteo**.
+- **Fuel & Budget Estimator**: Calculates estimated fuel costs based on vehicle efficiency (L/100 km) and regional fuel prices.
+
+### 8. 💾 Storage, Export & Sharing
+- **Offline & Local Storage**: Automatically saves waypoints, settings, and itinerary state to `localStorage`.
+- **Export Options**:
+  - **GPX** (for dedicated GPS units and handheld devices)
+  - **KML** (for Google Earth and custom map viewers)
+  - **CSV** (for spreadsheets and expense tracking)
+  - **iCal / ICS** (adds daily itinerary schedules to Google Calendar, Apple Calendar, or Outlook)
+- **Collaborative Sharing**: Share trips via encoded URL hash or optional KV short links.
+
+---
+
+## 🛠️ Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript 5 |
-| Styling | Tailwind CSS 3 (with dark mode) |
-| Maps | Google Maps JavaScript API |
-| Routing | Google Directions API |
-| Places | Google Places API v1 (Nearby Search) |
-| Map Loader | @googlemaps/js-api-loader |
-| Date utilities | date-fns 3 |
-# TripPlanner — Road‑trip itinerary planner 🚗
+|-------|------------|
+| **Framework** | [Next.js 14](https://nextjs.org/) (App Router, Server Actions & Route Handlers) |
+| **Language** | [TypeScript 5](https://www.typescriptlang.org/) |
+| **Styling** | [Tailwind CSS 3](https://tailwindcss.com/) with Dark Mode & Glassmorphism |
+| **Map Providers** | [Google Maps JavaScript API](https://developers.google.com/maps) & [HERE Maps API for JavaScript v3.1](https://developer.here.com/) |
+| **Routing Engines** | Google Directions API & HERE Routing API v8 |
+| **Places & Search** | Google Places API (New) & HERE Browse / Discover API |
+| **Traffic Data** | HERE Traffic API v7 (Incidents & Real-Time Flow) |
+| **Weather** | Open-Meteo Weather Forecast API |
+| **Polyline Utilities** | `@googlemaps/js-api-loader`, `@here/flexpolyline` |
+| **Date & Time** | `date-fns` |
 
-TripPlanner is a multi‑provider road‑trip itinerary planner that generates editable, multi‑day driving plans with hotels, gas stops, attractions, and exports. Built with Next.js + TypeScript and supports both Google Maps and HERE as routing/place providers.
-1. **Node.js** 18+ installed
-## Features
+---
 
-- Multi‑provider maps: Google Maps (Directions + Places) and HERE routing/place services
-- Route planning & optimization: add waypoints and get an optimized driving order per-day
-- Day splitting: automatically groups route legs into daily driving segments
-- Hotel suggestions, gas & EV charging stops, attractions, and restaurant recommendations
-- Traffic‑aware ETAs (Google) for future departure dates
-- Weather forecasts (Open‑Meteo) on day cards
-- Budget & fuel-cost summary (per‑day and total) using configurable fuel price and efficiency
-- Saved trips (localStorage) and import/export (CSV, GPX, KML, iCal)
-- Collaborative share: short links backed by a KV store (optional) or hash‑based share
-- Editable plan: insert overnight stops, toggle rest days, and re‑optimize individual days
-- Accessible UI, dark-mode-aware styles, and mobile responsive layout
+## 🚀 Getting Started
 
-## Tech Stack
+### Prerequisites
+- **Node.js** 18.17+ or higher
+- **npm**, **pnpm**, or **yarn**
+- API Keys:
+  - **Google Maps API Key** (Maps JavaScript API, Directions API, Places API, Geocoding API)
+  - **HERE API Key** (optional, required if using HERE Maps and HERE Traffic)
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS |
-| Maps / Routing | Google Maps & HERE (provider abstraction) |
-| Places | Google Places API v1, HERE Browse API |
-| Weather | Open‑Meteo |
-| Short links / KV | Vercel KV (optional) |
-| Utilities | date‑fns, @googlemaps/js-api-loader, @here/flexpolyline |
+### Installation
 
-## Prerequisites
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/legator/TripPlanner.git
+   cd TripPlanner
+   ```
 
-1. Node.js 18+ installed
-2. API keys (one or more):
-   - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` — browser key for Maps JS and Places (recommended with HTTP referrer restrictions)
-   - `GOOGLE_MAPS_API_KEY` — server key for Directions/Places server calls (keep secret)
-   - `NEXT_PUBLIC_HERE_API_KEY` / `HERE_API_KEY` — optional HERE keys if you use HERE as a provider
-   - (Optional) `KV_REST_API_URL` and `KV_REST_API_TOKEN` — to enable short‑link sharing via a KV store
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-   Enable the Google APIs you need in Google Cloud Console: Maps JavaScript API, Directions API, Places API, Geocoding API.
-|----------|---------|---------|
-## Setup
+3. **Configure Environment Variables:**
+   Copy the example environment file:
+   ```bash
+   cp env.local.example .env.local
+   ```
+   Add your API keys to `.env.local`:
+   ```env
+   # Google Maps Platform
+   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_browser_restricted_google_key
+   GOOGLE_MAPS_API_KEY=your_server_side_google_key
+
+   # HERE Technologies (Optional for HERE Maps & Traffic v7)
+   NEXT_PUBLIC_HERE_API_KEY=your_here_api_key
+   HERE_API_KEY=your_here_api_key
+
+   # Optional Map Provider Default ('google' | 'here')
+   NEXT_PUBLIC_MAP_PROVIDER=here
+
+   # Optional Vercel KV for short share links
+   KV_REST_API_URL=
+   KV_REST_API_TOKEN=
+   ```
+
+4. **Run the Development Server:**
+   ```bash
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## 📖 How to Use
+
+1. **Pick Map Provider**: Choose Google Maps or HERE Maps (can be changed anytime in settings).
+2. **Add Waypoints**: Enter your starting point and intermediate or final destinations using the autocomplete search.
+3. **Configure Preferences**: Set your maximum daily driving hours, fuel efficiency, rest day frequency, departure date, and transport mode.
+4. **Generate Itinerary**: Click **"Plan My Trip"** to produce daily driving legs, stop schedules, and lodging recommendations.
+5. **Fine-Tune**: Insert overnight stops, toggle rest days, or re-order segments.
+6. **Launch Driving Mode**:
+   - Tap **"Driving Mode"** or the car icon (`🚗`).
+   - The HUD will automatically lock onto your live GPS location, match your active day, target the next upcoming waypoint, and keep your screen awake while driving.
+7. **Export or Share**: Download GPX/KML/CSV/iCal files or generate a shareable link.
+
+---
+
+## 🧪 Testing & Verification
 
 ```bash
-# 1. Install dependencies
-npm install
+# Type check TypeScript code
+npx tsc --noEmit
 
-# 2. Create your environment file
-cp env.local.example .env.local
+# Run ESLint validation
+npm run lint
 
-# 3. Add your API keys to .env.local (see Prerequisites above)
-
-# 4. Start the development server
-npm run dev
+# Build production bundle
+npm run build
 ```
 
-Open http://localhost:3000 in your browser.
-│  (sidebar, cards)    │              │                      │
-## How It Works
+---
 
-The app is split between a client UI (Maps, place autocomplete, and interactive plan editing) and a server planner (the API route that calls routing/place services and runs the trip algorithm).
+## 📄 License
 
-High level flow:
-- Client collects waypoints and settings and POSTs `/api/plan` (includes selected provider)
-- Server calls the chosen routing provider (Google or HERE) to build the route and legs
-- Server groups legs into daily chunks, searches nearby places (hotels, gas, attractions), and returns a `TripPlan` JSON
-- Client renders the plan and allows edits (rest days, overnight stops) that are re-applied on re-plan
-
-See `src/lib/tripPlanner.ts` and `src/lib/tripPlanEditor.ts` for the core logic.
-│   ├── GoogleMapsProvider.tsx  # Maps JS API loader + context
-## Usage
-
-1. Add a starting point and destinations via the autocomplete
-2. Adjust `Trip Settings` (driving limits, fuel settings, rest day interval)
-3. Click `Plan My Trip` to generate the itinerary
-4. Use `Details` on each day to view hotels, gas, attractions, and weather
-5. Share the trip (short link) or export as CSV/GPX/KML/iCal
-│   ├── DayCard.tsx             # Individual day card with all POI sections
-## API Keys & Security
-
-- Use a browser‑restricted key for `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` and a server key for server-side calls.
-- If enabling short‑link sharing backed by KV, set `KV_REST_API_URL` and `KV_REST_API_TOKEN` in your environment.
-- Do not commit secret keys to source control.
-
-## License
-
-MIT
-
-1. **Add Waypoints** — Search for your departure and all destinations using the autocomplete input
-2. **Configure Settings** — Adjust driving limits, fuel range, fuel cost, rest-day frequency, and more
-3. **Plan Trip** — Click "Plan My Trip" to generate your itinerary
-4. **Explore the Plan** — Browse day-by-day cards; click "View Details" for hotels, gas, EV charging, campgrounds, and attractions
-5. **Edit the Plan** — Toggle rest days, shift day boundaries interactively
-6. **Export or Share** — Download GPX, KML, CSV, or iCal; or copy a share URL
-
-## CI/CD
-
-GitHub Actions workflows are included:
-
-| Workflow | Trigger | Action |
-|----------|---------|--------|
-| `ci.yml` | Push / PR to `main` | Lint + build |
-| `deploy.yml` | Push to `main` / PR | Deploy to Vercel (production / preview) |
-
-Required GitHub Secrets for deployment: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `GOOGLE_MAPS_API_KEY`.
-
-## Google Maps API Key Setup
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a project and enable:
-   - **Maps JavaScript API**
-   - **Directions API**
-   - **Places API (New)**
-   - **Geocoding API**
-3. Create two API keys (or one shared key):
-   - **Browser key** — restrict to HTTP referrers (`http://localhost:3000/*` + your production domain)
-   - **Server key** — restrict to your server's IP (or leave unrestricted for development)
-4. Copy both keys into `.env.local`
-
-## License
-
-MIT
+This project is licensed under the **MIT License**.

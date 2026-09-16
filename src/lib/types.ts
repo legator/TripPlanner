@@ -23,8 +23,10 @@ export enum PlaceType {
   GAS_STATION = 'gas_station',
   ATTRACTION = 'attraction',
   RESTAURANT = 'restaurant',
+  CAFE = 'cafe',
   EV_CHARGING = 'ev_charging',
   CAMPGROUND = 'campground',
+  REST_STOP = 'rest_stop',
 }
 
 export interface Waypoint {
@@ -150,3 +152,16 @@ export interface PlanTripRequestWithProvider extends PlanTripRequest {
 }
 
 export type ActiveView = 'input' | 'plan';
+
+export interface TrafficIncident {
+  id: string;
+  type: 'roadClosure' | 'roadwork' | 'accident' | 'hazard' | 'congestion' | 'other';
+  criticality: 'critical' | 'major' | 'minor' | 'lowImpact';
+  roadClosed: boolean;
+  description: string;
+  summary: string;
+  location: LatLng;
+  lengthMeters?: number;
+  startTime?: string;
+  endTime?: string;
+}

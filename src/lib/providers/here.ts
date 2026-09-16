@@ -228,6 +228,8 @@ const HERE_CATEGORIES: Record<string, string> = {
   tourist_attraction: '300-3000',
   restaurant: '100-1000',
   campground: '400-4300-0266',
+  cafe: '100-1100',
+  rest_stop: '700-7900-0140,400-4000-4270,300-3000',
 };
 
 async function callHereBrowse(

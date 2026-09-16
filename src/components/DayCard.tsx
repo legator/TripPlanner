@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { DayPlan, Waypoint } from '@/lib/types';
 import { DAY_COLORS } from '@/lib/constants';
 import PlaceCard from './PlaceCard';
-import PlaceAutocomplete from './PlaceAutocomplete';
+import PlaceSearch from './PlaceSearch';
 import WeatherBadge from './WeatherBadge';
 
 interface DayCardProps {
@@ -17,6 +17,8 @@ interface DayCardProps {
   onSetDayEnd: (dayIndex: number, segmentCount: number) => void;
   onAddOvernightStop: (dayIndex: number, waypoint: Waypoint) => void;
   onOptimizeRoute?: (dayIndex: number) => void;
+  onStartDayFromLocation?: (dayIndex: number) => void;
+  onStartDriving?: (dayIndex: number) => void;
   isPlanning: boolean;
   maxDistanceKm: number;
   maxDrivingMinutes: number;
@@ -32,6 +34,8 @@ export default function DayCard({
   onSetDayEnd,
   onAddOvernightStop,
   onOptimizeRoute,
+  onStartDayFromLocation,
+  onStartDriving,
   isPlanning,
   maxDistanceKm,
   maxDrivingMinutes,
@@ -201,6 +205,32 @@ export default function DayCard({
                 🏨 Change overnight
               </button>
             )}
+            {onStartDayFromLocation && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStartDayFromLocation(dayIndex);
+                }}
+                className="px-2 py-0.5 text-xs rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition-colors flex items-center gap-1"
+                disabled={isPlanning}
+                title="Start this day from your current location"
+              >
+                <span>📍 Start from Here</span>
+              </button>
+            )}
+            {onStartDriving && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStartDriving(dayIndex);
+                }}
+                className="px-2.5 py-0.5 text-xs rounded-full bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors flex items-center gap-1 shadow-sm"
+                disabled={isPlanning}
+                title="Start live GPS driving follow mode for this day"
+              >
+                <span>🚗 Drive</span>
+              </button>
+            )}
           </>
         )}
       </div>
@@ -262,7 +292,7 @@ export default function DayCard({
 
           {/* Search: add a completely new stop */}
           <div>
-            <PlaceAutocomplete
+            <PlaceSearch
               placeholder="Search city, hotel, place..."
               disabled={isPlanning}
               onPlaceSelect={(waypoint) => {
