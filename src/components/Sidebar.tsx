@@ -33,6 +33,11 @@ interface SidebarProps {
   mapProvider?: MapProviderChoice;
   onChangeMapProvider?: () => void;
   onLoadSavedTrip?: (trip: SavedTrip) => void;
+  onOpenUpdateTripModal?: () => void;
+  onStartDayFromLocation?: (dayIndex: number) => void;
+  onStartDriving?: (dayIndex?: number) => void;
+  onSetStart?: (waypoint: Waypoint) => void;
+  onToggleMobileMap?: () => void;
 }
 
 export default function Sidebar({
@@ -54,6 +59,11 @@ export default function Sidebar({
   mapProvider,
   onChangeMapProvider,
   onLoadSavedTrip,
+  onOpenUpdateTripModal,
+  onStartDayFromLocation,
+  onStartDriving,
+  onSetStart,
+  onToggleMobileMap,
 }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -137,6 +147,18 @@ export default function Sidebar({
     onWaypointsChange([...waypoints, wp]);
   };
 
+  const handleSetStart = (wp: Waypoint) => {
+    if (onSetStart) {
+      onSetStart(wp);
+    } else if (waypoints.length === 0) {
+      onWaypointsChange([wp]);
+    } else {
+      const updated = [...waypoints];
+      updated[0] = wp;
+      onWaypointsChange(updated);
+    }
+  };
+
   const removeWaypoint = (id: string) => {
     onWaypointsChange(waypoints.filter((w) => w.id !== id));
   };
@@ -149,18 +171,30 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-[420px] h-screen bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shadow-lg flex-shrink-0">
+    <div className="w-full md:w-[390px] lg:w-[420px] h-full bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shadow-lg flex-shrink-0">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-primary-600 to-primary-700">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center">
-            <span className="text-xl">🚗</span>
+      <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-primary-600 to-primary-700 flex items-center justify-between">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 bg-white/20 rounded-lg flex items-center justify-center">
+            <span className="text-lg sm:text-xl">🚗</span>
           </div>
-          <div className="flex-1">
-            <h1 className="text-lg font-bold text-white">Trip Planner</h1>
-            <p className="text-xs text-primary-200">Plan your road trip</p>
+          <div>
+            <h1 className="text-base sm:text-lg font-bold text-white leading-tight">Trip Planner</h1>
+            <p className="text-[11px] sm:text-xs text-primary-200">Plan your road trip</p>
           </div>
         </div>
+
+        {onToggleMobileMap && (
+          <button
+            type="button"
+            onClick={onToggleMobileMap}
+            className="md:hidden px-3 py-1.5 bg-white/20 hover:bg-white/30 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow"
+            title="Switch to Map"
+          >
+            <span>🗺️</span>
+            <span>Map</span>
+          </button>
+        )}
       </div>
 
       {/* Content */}
@@ -173,6 +207,7 @@ export default function Sidebar({
               onAdd={addWaypoint}
               onRemove={removeWaypoint}
               onReorder={reorderWaypoints}
+              onSetStart={handleSetStart}
               disabled={isPlanning}
               oneWayTrip={settings.oneWayTrip}
               supportsOptimization={mapProvider === 'google'}
@@ -252,8 +287,10 @@ export default function Sidebar({
             onToggleRestDay={onToggleRestDay}
             onSetDayEnd={onSetDayEnd}
             onAddOvernightStop={onAddOvernightStop}
-            // Enable optimize for both Google and HERE
             onOptimizeRoute={onOptimizeRoute}
+            onOpenUpdateTripModal={onOpenUpdateTripModal}
+            onStartDayFromLocation={onStartDayFromLocation}
+            onStartDriving={onStartDriving}
             isPlanning={isPlanning}
             maxDistanceKm={settings.maxDistancePerDayKm}
             maxDrivingMinutes={settings.maxDrivingMinutesPerDay}
@@ -393,6 +430,20 @@ export default function Sidebar({
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
             </svg>
             {shareCopied ? '✅ Link copied!' : '🔗 Share trip URL'}
+          </button>
+        </div>
+      )}
+
+      {/* Mobile-only Bottom View Map Bar */}
+      {onToggleMobileMap && (
+        <div className="md:hidden p-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex-shrink-0 safe-pb">
+          <button
+            type="button"
+            onClick={onToggleMobileMap}
+            className="w-full py-2.5 px-4 bg-primary-600 hover:bg-primary-500 active:scale-[0.98] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg transition-all"
+          >
+            <span>🗺️</span>
+            <span>View Map ({waypoints.length} {waypoints.length === 1 ? 'stop' : 'stops'})</span>
           </button>
         </div>
       )}

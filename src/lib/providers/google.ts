@@ -146,8 +146,15 @@ export const googleProvider: RoutingProvider = {
 
   async searchNearby(location, type, radius, maxResults = 5): Promise<NearbyPlace[]> {
     const url = 'https://places.googleapis.com/v1/places:searchNearby';
+    const typeMap: Record<string, string[]> = {
+      gas_station: ['gas_station'],
+      restaurant: ['restaurant', 'cafe', 'fast_food_restaurant'],
+      cafe: ['cafe', 'coffee_shop'],
+      rest_stop: ['rest_stop', 'park', 'tourist_attraction'],
+      lodging: ['hotel', 'motel', 'lodging'],
+    };
     const body = {
-      includedTypes: [type],
+      includedTypes: typeMap[type] || [type],
       maxResultCount: Math.min(maxResults, 20),
       locationRestriction: {
         circle: {

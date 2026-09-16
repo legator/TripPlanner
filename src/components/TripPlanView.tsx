@@ -13,6 +13,9 @@ interface TripPlanViewProps {
   onSetDayEnd: (dayIndex: number, segmentCount: number) => void;
   onAddOvernightStop: (dayIndex: number, waypoint: Waypoint) => void;
   onOptimizeRoute?: (dayIndex: number) => void;
+  onOpenUpdateTripModal?: () => void;
+  onStartDayFromLocation?: (dayIndex: number) => void;
+  onStartDriving?: (dayIndex?: number) => void;
   isPlanning: boolean;
   maxDistanceKm: number;
   maxDrivingMinutes: number;
@@ -27,6 +30,9 @@ export default function TripPlanView({
   onSetDayEnd,
   onAddOvernightStop,
   onOptimizeRoute,
+  onOpenUpdateTripModal,
+  onStartDayFromLocation,
+  onStartDriving,
   isPlanning,
   maxDistanceKm,
   maxDrivingMinutes,
@@ -78,7 +84,7 @@ export default function TripPlanView({
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-2">
-          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-2.5 text-center">
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-2.5 text-center">
           <p className="text-lg font-bold text-blue-700 dark:text-blue-300">{drivingDays}+{restDays}</p>
           <p className="text-xs text-blue-500 dark:text-blue-400">Drive + Rest</p>
         </div>
@@ -101,6 +107,34 @@ export default function TripPlanView({
             </p>
             <p className="text-xs text-amber-500 dark:text-amber-400">Estimated fuel cost</p>
           </div>
+        )}
+      </div>
+
+      {/* Live Action Buttons */}
+      <div className="grid grid-cols-2 gap-2">
+        {onOpenUpdateTripModal && (
+          <button
+            type="button"
+            onClick={onOpenUpdateTripModal}
+            disabled={isPlanning}
+            className="py-2.5 px-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 border border-blue-200 dark:border-blue-800 transition-all truncate"
+            title="Recalculate route from current GPS location"
+          >
+            <span>🧭</span>
+            <span className="truncate">Update from GPS</span>
+          </button>
+        )}
+        {onStartDriving && (
+          <button
+            type="button"
+            onClick={() => onStartDriving(selectedDay !== null ? selectedDay : 0)}
+            disabled={isPlanning}
+            className="py-2.5 px-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all transform active:scale-[0.99] truncate"
+            title="Launch live in-app driving follow mode with HUD"
+          >
+            <span>🚗</span>
+            <span className="truncate">Driving Mode</span>
+          </button>
         )}
       </div>
 
@@ -151,6 +185,8 @@ export default function TripPlanView({
               onSetDayEnd={onSetDayEnd}
               onAddOvernightStop={onAddOvernightStop}
               onOptimizeRoute={onOptimizeRoute}
+              onStartDayFromLocation={onStartDayFromLocation}
+              onStartDriving={onStartDriving}
               isPlanning={isPlanning}
               maxDistanceKm={maxDistanceKm}
               maxDrivingMinutes={maxDrivingMinutes}

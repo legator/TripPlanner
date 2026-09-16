@@ -23,8 +23,10 @@ export enum PlaceType {
   GAS_STATION = 'gas_station',
   ATTRACTION = 'attraction',
   RESTAURANT = 'restaurant',
+  CAFE = 'cafe',
   EV_CHARGING = 'ev_charging',
   CAMPGROUND = 'campground',
+  REST_STOP = 'rest_stop',
 }
 
 export interface Waypoint {
