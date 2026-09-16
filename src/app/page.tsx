@@ -17,6 +17,7 @@ import { decodeTripFromURL, loadTripFromShareParam } from '@/lib/tripShare';
 import UpdateTripModal, { TripUpdateMode } from '@/components/UpdateTripModal';
 import DrivingHUD from '@/components/DrivingHUD';
 import { LiveDrivingPosition, watchCurrentPosition } from '@/lib/location';
+import { findActiveTripDayAndTarget } from '@/lib/routeProgress';
 import { requestScreenWakeLock, releaseScreenWakeLock } from '@/lib/wakeLock';
 import { format } from 'date-fns';
 import type { UserEdits } from '@/lib/tripPlanEditor';
@@ -283,12 +284,30 @@ export default function Home() {
     setIsUpdateTripModalOpen(true);
   }, []);
 
-  const handleStartDriving = useCallback((dayIndex = 0) => {
-    setDrivingDayIndex(dayIndex);
-    setSelectedDay(dayIndex);
-    setAutoFollow(true);
-    setIsDrivingMode(true);
-  }, []);
+  const handleStartDriving = useCallback(
+    (explicitDayIndex?: number) => {
+      let dayToUse = explicitDayIndex;
+
+      // Automatically determine the active day matching current GPS location along route
+      if (dayToUse === undefined && tripPlan) {
+        const active = findActiveTripDayAndTarget(
+          tripPlan,
+          drivingPosition ? { lat: drivingPosition.lat, lng: drivingPosition.lng } : null
+        );
+        if (active) {
+          dayToUse = active.activeDayIndex;
+        }
+      }
+
+      const finalDay = dayToUse ?? (selectedDay !== null ? selectedDay : 0);
+      setDrivingDayIndex(finalDay);
+      setSelectedDay(finalDay);
+      setAutoFollow(true);
+      setIsDrivingMode(true);
+      setMobileTab('map');
+    },
+    [tripPlan, drivingPosition, selectedDay]
+  );
 
   const handleExitDriving = useCallback(() => {
     setIsDrivingMode(false);
@@ -510,6 +529,11 @@ export default function Home() {
       onFocusPlace={handleFocusPlace}
       onAddStop={handleAddStopFromDriving}
       mapProvider={mapProvider ?? undefined}
+      tripPlan={tripPlan}
+      onChangeDay={(newDay) => {
+        setDrivingDayIndex(newDay);
+        setSelectedDay(newDay);
+      }}
     />
   ) : null;
 
@@ -536,7 +560,7 @@ export default function Home() {
         {tripPlan && (
           <button
             type="button"
-            onClick={() => handleStartDriving(selectedDay ?? 0)}
+            onClick={() => handleStartDriving(selectedDay !== null ? selectedDay : undefined)}
             className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl shadow-2xl text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-blue-500/30 animate-pulse"
           >
             <span>🚗</span>
@@ -571,7 +595,7 @@ export default function Home() {
               <HereMapView
                 waypoints={waypoints}
                 tripPlan={tripPlan}
-                selectedDay={selectedDay}
+                selectedDay={isDrivingMode ? drivingDayIndex : selectedDay}
                 onAddWaypoint={addWaypoint}
                 onSetStart={handleSetStart}
                 onOpenUpdateTripModal={() => setIsUpdateTripModalOpen(true)}
@@ -602,7 +626,7 @@ export default function Home() {
             <MapView
               waypoints={waypoints}
               tripPlan={tripPlan}
-              selectedDay={selectedDay}
+              selectedDay={isDrivingMode ? drivingDayIndex : selectedDay}
               onAddWaypoint={addWaypoint}
               onSetStart={handleSetStart}
               onOpenUpdateTripModal={() => setIsUpdateTripModalOpen(true)}

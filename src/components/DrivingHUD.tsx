@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
-import { DayPlan, Place, PlaceType } from '@/lib/types';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { DayPlan, Place, PlaceType, TrafficIncident, TripPlan } from '@/lib/types';
 import { LiveDrivingPosition, calculateHaversineDistanceKm, getNavigationAppUrl } from '@/lib/location';
+import { getOrderedDayTargetStops, findUpcomingStopOnDay, findActiveTripDayAndTarget, DayTargetStop } from '@/lib/routeProgress';
 
 export type QuickStopCategory = 'gas' | 'food' | 'rest';
 
@@ -18,6 +19,8 @@ interface DrivingHUDProps {
   onFocusPlace?: (place: Place | null) => void;
   onAddStop?: (place: Place) => void;
   mapProvider?: string;
+  tripPlan?: TripPlan | null;
+  onChangeDay?: (dayIndex: number) => void;
 }
 
 interface PlaceWithDistance extends Place {
@@ -37,37 +40,123 @@ export default function DrivingHUD({
   onFocusPlace,
   onAddStop,
   mapProvider,
+  tripPlan,
+  onChangeDay,
 }: DrivingHUDProps) {
+  const [activeCategory, setActiveCategory] = useState<QuickStopCategory | 'traffic' | null>(null);
   const [showNavMenu, setShowNavMenu] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<QuickStopCategory | null>(null);
-  const [livePlaces, setLivePlaces] = useState<Record<QuickStopCategory, Place[]>>({
+  const [livePlaces, setLivePlaces] = useState<{ [key in QuickStopCategory]: PlaceWithDistance[] }>({
     gas: [],
     food: [],
     rest: [],
   });
   const [isLoadingNearby, setIsLoadingNearby] = useState(false);
+  const [trafficIncidents, setTrafficIncidents] = useState<TrafficIncident[]>([]);
+  const [isLoadingTraffic, setIsLoadingTraffic] = useState(false);
+  const [dismissedIncidents, setDismissedIncidents] = useState<string[]>([]);
+  const lastFetchedTrafficRef = useRef<{ lat: number; lng: number } | null>(null);
   const [navTargetPlace, setNavTargetPlace] = useState<Place | null>(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+
+  const showNotice = useCallback((msg: string) => {
+    setActionSuccessMsg(msg);
+    setTimeout(() => setActionSuccessMsg(null), 3500);
+  }, []);
 
   // Speed in km/h (position.speed is in m/s)
   const speedKmh = currentPosition?.speed && currentPosition.speed > 0.5
     ? Math.round(currentPosition.speed * 3.6)
     : 0;
 
-  // Next target destination for this day (defaults to endLocation)
-  const nextTarget = day.mainStops.length > 0 ? day.mainStops[0] : day.endLocation;
-  const targetLocation = nextTarget.location;
-  const targetName = nextTarget.name.split(',')[0];
+  // Ordered list of upcoming destination targets for this day
+  const allStops = useMemo(() => {
+    return getOrderedDayTargetStops(day, dayIndex);
+  }, [day, dayIndex]);
 
-  // Remaining distance in km
-  const distanceRemainingKm = currentPosition
-    ? calculateHaversineDistanceKm(
-        { lat: currentPosition.lat, lng: currentPosition.lng },
-        targetLocation
-      )
+  // Optional manual target index override
+  const [manualTargetIndex, setManualTargetIndex] = useState<number | null>(null);
+  const prevTargetIdRef = useRef<string | null>(null);
+  const hasAutoSyncedDayRef = useRef<boolean>(false);
+
+  // Auto-sync active Day when entering drive mode based on vehicle's live GPS coordinates
+  useEffect(() => {
+    if (hasAutoSyncedDayRef.current || !currentPosition || !tripPlan || !onChangeDay) return;
+    hasAutoSyncedDayRef.current = true;
+
+    const active = findActiveTripDayAndTarget(
+      tripPlan,
+      { lat: currentPosition.lat, lng: currentPosition.lng }
+    );
+
+    if (active.activeDayIndex !== dayIndex) {
+      showNotice(`📍 Located on Day ${active.activeDayIndex + 1} • Next: ${active.targetStop.name.split(',')[0]}`);
+      onChangeDay(active.activeDayIndex);
+    }
+  }, [currentPosition, tripPlan, dayIndex, onChangeDay, showNotice]);
+
+  // Automatically find the upcoming stop from vehicle's progress along the route
+  const upcomingResult = useMemo(() => {
+    return findUpcomingStopOnDay(
+      day,
+      dayIndex,
+      currentPosition ? { lat: currentPosition.lat, lng: currentPosition.lng } : null
+    );
+  }, [day, dayIndex, currentPosition]);
+
+  const activeStopIndex =
+    manualTargetIndex !== null && manualTargetIndex < allStops.length
+      ? manualTargetIndex
+      : upcomingResult.targetIndex;
+
+  const targetStop: DayTargetStop = allStops[activeStopIndex] || upcomingResult.targetStop;
+  const targetLocation = targetStop.location;
+  const targetName = targetStop.name.split(',')[0];
+
+  // Auto-advancement toast notice when a stop has been reached / passed
+  useEffect(() => {
+    const currentId = targetStop.id;
+    if (prevTargetIdRef.current && prevTargetIdRef.current !== currentId) {
+      const prevStop = allStops.find((s) => s.id === prevTargetIdRef.current);
+      if (prevStop) {
+        showNotice(`✅ Passed ${prevStop.name.split(',')[0]} • Next: ${targetName}`);
+      }
+    }
+    prevTargetIdRef.current = currentId;
+  }, [targetStop.id, allStops, targetName, showNotice]);
+
+  // If driver has completed the entire day and there is a next day, advance automatically
+  useEffect(() => {
+    if (upcomingResult.isDayPassed && dayIndex + 1 < totalDays && onChangeDay) {
+      showNotice(`🎉 Day ${dayIndex + 1} Complete! Starting Day ${dayIndex + 2}`);
+      setManualTargetIndex(null);
+      onChangeDay(dayIndex + 1);
+    }
+  }, [upcomingResult.isDayPassed, dayIndex, totalDays, onChangeDay, showNotice]);
+
+  // Remaining distance in km to THIS immediate upcoming target
+  const distanceRemainingKm =
+    activeStopIndex === upcomingResult.targetIndex && upcomingResult.distanceToTargetKm > 0
+      ? upcomingResult.distanceToTargetKm
+      : currentPosition
+      ? Math.round(
+          calculateHaversineDistanceKm(
+            { lat: currentPosition.lat, lng: currentPosition.lng },
+            targetLocation
+          ) * 10
+        ) / 10
+      : Math.round(calculateHaversineDistanceKm(day.startLocation.location, targetLocation) * 10) / 10;
+
+  // Total remaining day distance to overnight stop
+  const totalDayRemainingKm = currentPosition
+    ? Math.round(
+        calculateHaversineDistanceKm(
+          { lat: currentPosition.lat, lng: currentPosition.lng },
+          day.endLocation.location
+        ) * 10
+      ) / 10
     : day.distanceKm;
 
-  // Rough ETA minutes (if moving use current speed, else assume 70 km/h average driving speed)
+  // Rough ETA minutes to this immediate target
   const effectiveSpeedKmh = speedKmh > 20 ? speedKmh : 70;
   const etaMinutes = Math.round((distanceRemainingKm / effectiveSpeedKmh) * 60);
   const etaHours = Math.floor(etaMinutes / 60);
@@ -139,6 +228,66 @@ export default function DrivingHUD({
     return `${km.toFixed(1)} km`;
   };
 
+  // Fetch nearby traffic incidents from HERE Traffic API v7
+  const fetchTrafficIncidents = useCallback(async () => {
+    const lat = currentPosition?.lat ?? day.startLocation.location.lat;
+    const lng = currentPosition?.lng ?? day.startLocation.location.lng;
+
+    setIsLoadingTraffic(true);
+    try {
+      const res = await fetch(`/api/traffic/incidents?lat=${lat}&lng=${lng}&radius=25000&limit=25`);
+      if (res.ok) {
+        const data = await res.json();
+        setTrafficIncidents(data.incidents || []);
+      }
+    } catch (err) {
+      console.warn('Driving HUD traffic incidents fetch error:', err);
+    } finally {
+      setIsLoadingTraffic(false);
+    }
+  }, [currentPosition, day.startLocation.location]);
+
+  useEffect(() => {
+    const lat = currentPosition?.lat ?? day.startLocation.location.lat;
+    const lng = currentPosition?.lng ?? day.startLocation.location.lng;
+
+    if (lastFetchedTrafficRef.current) {
+      const dist = calculateHaversineDistanceKm({ lat, lng }, lastFetchedTrafficRef.current);
+      if (dist < 4) return;
+    }
+    lastFetchedTrafficRef.current = { lat, lng };
+    fetchTrafficIncidents();
+  }, [currentPosition?.lat, currentPosition?.lng, day.startLocation.location.lat, day.startLocation.location.lng, fetchTrafficIncidents]);
+
+  // Compute live distance to each traffic incident
+  const incidentsWithDistance = useMemo(() => {
+    const userLat = currentPosition?.lat ?? day.startLocation.location.lat;
+    const userLng = currentPosition?.lng ?? day.startLocation.location.lng;
+
+    return trafficIncidents
+      .map((inc) => {
+        const distKm = calculateHaversineDistanceKm({ lat: userLat, lng: userLng }, inc.location);
+        const estSpeed = speedKmh > 25 ? speedKmh : 65;
+        const driveTimeMin = Math.max(1, Math.round((distKm / estSpeed) * 60));
+        return {
+          ...inc,
+          distanceKm: distKm,
+          driveTimeMin,
+        };
+      })
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+  }, [trafficIncidents, currentPosition, day.startLocation.location, speedKmh]);
+
+  // Closest high-priority incident within 12km for warning banner
+  const closestCriticalIncident = useMemo(() => {
+    return incidentsWithDistance.find(
+      (inc) =>
+        (inc.roadClosed || inc.criticality === 'critical' || inc.criticality === 'major') &&
+        inc.distanceKm <= 12 &&
+        !dismissedIncidents.includes(inc.id)
+    );
+  }, [incidentsWithDistance, dismissedIncidents]);
+
   // Fetch live nearby POIs around current GPS coordinates
   const fetchNearbyPOIs = async (category: QuickStopCategory) => {
     const coords = currentPosition
@@ -192,11 +341,6 @@ export default function DrivingHUD({
     }
   };
 
-  const showNotice = (msg: string) => {
-    setActionSuccessMsg(msg);
-    setTimeout(() => setActionSuccessMsg(null), 3000);
-  };
-
   const handleFocusPlace = (place: Place) => {
     onFocusPlace?.(place);
     showNotice(`Centered map on ${place.name.split(',')[0]}`);
@@ -211,7 +355,7 @@ export default function DrivingHUD({
     setShowNavMenu(false);
     setNavTargetPlace(null);
     const origin = currentPosition ? { lat: currentPosition.lat, lng: currentPosition.lng } : undefined;
-    const dest = destinationOverride || { lat: day.endLocation.location.lat, lng: day.endLocation.location.lng };
+    const dest = destinationOverride || { lat: targetLocation.lat, lng: targetLocation.lng };
     const intermediateStops = destinationOverride
       ? undefined
       : day.mainStops.map((s) => ({ lat: s.location.lat, lng: s.location.lng }));
@@ -229,15 +373,63 @@ export default function DrivingHUD({
       <div className="flex flex-col gap-1.5 sm:gap-2 max-w-xl mx-auto w-full">
         {/* Top Header Card */}
         <div className="pointer-events-auto bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white rounded-2xl p-2.5 sm:p-4 shadow-2xl border border-white/10 flex items-center justify-between gap-2.5 sm:gap-4 animate-slideDown">
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
             <div className="w-8 h-8 sm:w-11 sm:h-11 rounded-xl bg-blue-600 flex items-center justify-center text-base sm:text-xl flex-shrink-0 shadow-lg shadow-blue-500/30">
-              🧭
+              {targetStop.isDayEnd ? '🏨' : '📍'}
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400">
-                  Day {day.dayNumber || dayIndex + 1} of {totalDays}
-                </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Day selector with steppers */}
+                <div className="flex items-center gap-0.5 bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 rounded-lg">
+                  {onChangeDay && dayIndex > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualTargetIndex(null);
+                        onChangeDay(dayIndex - 1);
+                      }}
+                      className="text-gray-400 hover:text-white px-1 py-0.2 rounded hover:bg-white/10 text-[10px] transition-colors"
+                      title="Previous day"
+                    >
+                      ◀
+                    </button>
+                  )}
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400 px-0.5">
+                    Day {day.dayNumber || dayIndex + 1} of {totalDays}
+                  </span>
+                  {onChangeDay && dayIndex + 1 < totalDays && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualTargetIndex(null);
+                        onChangeDay(dayIndex + 1);
+                      }}
+                      className="text-gray-400 hover:text-white px-1 py-0.2 rounded hover:bg-white/10 text-[10px] transition-colors"
+                      title="Next day"
+                    >
+                      ▶
+                    </button>
+                  )}
+                </div>
+
+                {allStops.length > 1 && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] bg-white/10 text-gray-300 font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
+                      Stop {activeStopIndex + 1} of {allStops.length}
+                    </span>
+                    {manualTargetIndex !== null && (
+                      <button
+                        type="button"
+                        onClick={() => setManualTargetIndex(null)}
+                        className="text-[10px] bg-blue-500/30 text-blue-200 hover:bg-blue-500/50 px-1.5 py-0.5 rounded font-semibold transition-colors flex items-center gap-0.5 border border-blue-400/30 animate-pulse"
+                        title="Reset to live auto-tracking"
+                      >
+                        Auto ↺
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {wakeLockActive && (
                   <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -245,32 +437,119 @@ export default function DrivingHUD({
                   </span>
                 )}
               </div>
-              <h2 className="text-xs sm:text-base font-bold truncate text-white">
-                Next: {targetName}
-              </h2>
+
+              {/* Target Name with Stepper Buttons if multiple stops */}
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {allStops.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setManualTargetIndex(Math.max(0, activeStopIndex - 1))}
+                    disabled={activeStopIndex === 0}
+                    className="w-5 h-5 rounded hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent flex items-center justify-center text-[10px] text-gray-300 transition-colors"
+                    title="Previous stop"
+                  >
+                    ◀
+                  </button>
+                )}
+
+                <h2 className="text-xs sm:text-base font-bold truncate text-white">
+                  Next: {targetName}
+                </h2>
+
+                {allStops.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setManualTargetIndex(Math.min(allStops.length - 1, activeStopIndex + 1))}
+                    disabled={activeStopIndex >= allStops.length - 1}
+                    className="w-5 h-5 rounded hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent flex items-center justify-center text-[10px] text-gray-300 transition-colors"
+                    title="Skip to next stop"
+                  >
+                    ▶
+                  </button>
+                )}
+              </div>
+
               <p className="text-[10px] sm:text-xs text-gray-400 truncate">
-                {day.startLocation.name.split(',')[0]} → {day.endLocation.name.split(',')[0]}
+                {targetStop.isDayEnd
+                  ? `${day.startLocation.name.split(',')[0]} → ${day.endLocation.name.split(',')[0]}`
+                  : `Leg to ${targetName} • Final: ${day.endLocation.name.split(',')[0]} (${totalDayRemainingKm} km day total)`}
               </p>
             </div>
           </div>
 
           <div className="text-right flex-shrink-0">
             <p className="text-lg sm:text-2xl font-black text-blue-400 tracking-tight">
-              {distanceRemainingKm} <span className="text-[10px] sm:text-xs font-semibold text-gray-400">km</span>
+              {distanceRemainingKm <= 0.25 ? (
+                <span className="text-emerald-400 font-bold text-base sm:text-xl">Here!</span>
+              ) : (
+                <>
+                  {distanceRemainingKm} <span className="text-[10px] sm:text-xs font-semibold text-gray-400">km</span>
+                </>
+              )}
             </p>
             <p className="text-[10px] sm:text-[11px] text-gray-300 font-medium">
-              ~{etaFormatted}
+              {distanceRemainingKm <= 0.25 ? 'Arrived' : `~${etaFormatted}`}
             </p>
           </div>
         </div>
 
-        {/* ── QUICK STOPS TOOLBAR (Gas, Food, Rest) ── */}
+        {/* ── LIVE HAZARD ALERT BANNER (Road closure / Critical incident ahead) ── */}
+        {closestCriticalIncident && (
+          <div className="pointer-events-auto w-full bg-rose-600/95 text-white p-2.5 sm:p-3 rounded-2xl shadow-2xl border border-rose-400/80 backdrop-blur-md flex items-center justify-between gap-2.5 animate-fadeIn">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="text-xl sm:text-2xl flex-shrink-0">
+                {closestCriticalIncident.roadClosed ? '⛔' : '⚠️'}
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] sm:text-[11px] font-black tracking-wide uppercase text-rose-100 bg-rose-900/80 px-1.5 py-0.5 rounded">
+                    {closestCriticalIncident.roadClosed ? 'Road Closed Ahead' : 'Hazard Alert'}
+                  </span>
+                  <span className="text-[10px] sm:text-[11px] font-mono font-bold text-white">
+                    {formatDistance(closestCriticalIncident.distanceKm)}
+                  </span>
+                </div>
+                <p className="text-xs font-semibold truncate text-white mt-0.5">
+                  {closestCriticalIncident.summary}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  onFocusPlace?.({
+                    id: closestCriticalIncident.id,
+                    name: closestCriticalIncident.summary,
+                    address: closestCriticalIncident.description,
+                    location: closestCriticalIncident.location,
+                    type: PlaceType.ATTRACTION,
+                  });
+                  setActiveCategory('traffic');
+                }}
+                className="px-2.5 py-1 bg-white text-rose-700 hover:bg-rose-50 text-xs font-bold rounded-lg shadow transition-colors"
+              >
+                View
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissedIncidents((prev) => [...prev, closestCriticalIncident.id])}
+                className="w-6 h-6 rounded-full hover:bg-white/20 text-white/80 hover:text-white flex items-center justify-center text-xs"
+                title="Dismiss warning"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── QUICK STOPS TOOLBAR (Gas, Food, Rest, Traffic) ── */}
         <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2 w-full justify-center">
           {/* Gas Button */}
           <button
             type="button"
             onClick={() => handleOpenCategory('gas')}
-            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2.5 px-2 sm:px-3 rounded-xl text-xs font-bold shadow-lg border transition-all flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2.5 px-1.5 sm:px-3 rounded-xl text-xs font-bold shadow-lg border transition-all flex items-center justify-center gap-1 sm:gap-1.5 ${
               activeCategory === 'gas'
                 ? 'bg-amber-600 text-white border-amber-400 shadow-amber-500/30 scale-[1.02]'
                 : 'bg-gray-900/85 hover:bg-gray-800 text-gray-100 border-white/10 hover:border-amber-500/40 backdrop-blur-md'
@@ -289,7 +568,7 @@ export default function DrivingHUD({
           <button
             type="button"
             onClick={() => handleOpenCategory('food')}
-            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2.5 px-2 sm:px-3 rounded-xl text-xs font-bold shadow-lg border transition-all flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2.5 px-1.5 sm:px-3 rounded-xl text-xs font-bold shadow-lg border transition-all flex items-center justify-center gap-1 sm:gap-1.5 ${
               activeCategory === 'food'
                 ? 'bg-orange-600 text-white border-orange-400 shadow-orange-500/30 scale-[1.02]'
                 : 'bg-gray-900/85 hover:bg-gray-800 text-gray-100 border-white/10 hover:border-orange-500/40 backdrop-blur-md'
@@ -308,7 +587,7 @@ export default function DrivingHUD({
           <button
             type="button"
             onClick={() => handleOpenCategory('rest')}
-            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2.5 px-2 sm:px-3 rounded-xl text-xs font-bold shadow-lg border transition-all flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2.5 px-1.5 sm:px-3 rounded-xl text-xs font-bold shadow-lg border transition-all flex items-center justify-center gap-1 sm:gap-1.5 ${
               activeCategory === 'rest'
                 ? 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-500/30 scale-[1.02]'
                 : 'bg-gray-900/85 hover:bg-gray-800 text-gray-100 border-white/10 hover:border-emerald-500/40 backdrop-blur-md'
@@ -316,9 +595,36 @@ export default function DrivingHUD({
           >
             <span className="text-sm sm:text-base">☕</span>
             <div className="flex flex-col text-left leading-tight">
-              <span className="text-[10px] sm:text-[11px]">Rest Stop</span>
+              <span className="text-[10px] sm:text-[11px]">Rest</span>
               <span className="text-[9px] sm:text-[10px] text-emerald-400 font-mono font-semibold">
                 {closestRest ? formatDistance(closestRest.distanceKm) : 'Nearby'}
+              </span>
+            </div>
+          </button>
+
+          {/* Traffic Alerts Button */}
+          <button
+            type="button"
+            onClick={() => setActiveCategory(activeCategory === 'traffic' ? null : 'traffic')}
+            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2.5 px-1.5 sm:px-3 rounded-xl text-xs font-bold shadow-lg border transition-all flex items-center justify-center gap-1 sm:gap-1.5 ${
+              activeCategory === 'traffic'
+                ? 'bg-rose-600 text-white border-rose-400 shadow-rose-500/30 scale-[1.02]'
+                : incidentsWithDistance.some((i) => i.roadClosed || i.criticality === 'critical')
+                ? 'bg-rose-950/85 hover:bg-rose-900/80 text-rose-200 border-rose-500/40 animate-pulse backdrop-blur-md'
+                : 'bg-gray-900/85 hover:bg-gray-800 text-gray-100 border-white/10 hover:border-rose-500/40 backdrop-blur-md'
+            }`}
+          >
+            <span className="text-sm sm:text-base">
+              {incidentsWithDistance.some((i) => i.roadClosed) ? '⛔' : '🚦'}
+            </span>
+            <div className="flex flex-col text-left leading-tight">
+              <span className="text-[10px] sm:text-[11px]">Traffic</span>
+              <span className="text-[9px] sm:text-[10px] text-rose-400 font-mono font-semibold">
+                {isLoadingTraffic
+                  ? 'Checking...'
+                  : incidentsWithDistance.length > 0
+                  ? `${incidentsWithDistance.length} alert${incidentsWithDistance.length === 1 ? '' : 's'}`
+                  : 'Clear'}
               </span>
             </div>
           </button>
@@ -333,14 +639,14 @@ export default function DrivingHUD({
         )}
       </div>
 
-      {/* ── EXPANDED POI DRAWER / MODAL ── */}
+      {/* ── EXPANDED POI / TRAFFIC DRAWER ── */}
       {activeCategory && (
         <div className="pointer-events-auto max-w-xl mx-auto w-full max-h-[55vh] sm:max-h-[50vh] landscape:max-h-[65vh] flex flex-col bg-gray-950/95 backdrop-blur-xl border border-white/20 rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-2xl text-white my-auto animate-slideUp overflow-hidden">
           {/* Drawer Header */}
           <div className="flex items-center justify-between pb-3 border-b border-white/10 flex-shrink-0">
             <div className="flex items-center gap-2.5">
               <span className="text-2xl">
-                {activeCategory === 'gas' ? '⛽' : activeCategory === 'food' ? '🍽️' : '☕'}
+                {activeCategory === 'gas' ? '⛽' : activeCategory === 'food' ? '🍽️' : activeCategory === 'rest' ? '☕' : '🚦'}
               </span>
               <div>
                 <h3 className="text-sm sm:text-base font-bold text-white">
@@ -348,25 +654,31 @@ export default function DrivingHUD({
                     ? 'Upcoming Gas Stations'
                     : activeCategory === 'food'
                     ? 'Upcoming Restaurants & Cafes'
-                    : 'Rest Stops & Relax Areas'}
+                    : activeCategory === 'rest'
+                    ? 'Rest Stops & Relax Areas'
+                    : 'Live Traffic Incidents'}
                 </h3>
                 <p className="text-[11px] text-gray-400">
-                  {categorizedPlaces[activeCategory].length} stops found ahead on route
+                  {activeCategory === 'traffic'
+                    ? `${incidentsWithDistance.length} incidents reported nearby (HERE Traffic v7)`
+                    : `${categorizedPlaces[activeCategory].length} stops found ahead on route`}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Scan live GPS Area */}
+              {/* Refresh / Scan button */}
               <button
                 type="button"
-                onClick={() => fetchNearbyPOIs(activeCategory)}
-                disabled={isLoadingNearby}
+                onClick={() => (activeCategory === 'traffic' ? fetchTrafficIncidents() : fetchNearbyPOIs(activeCategory))}
+                disabled={activeCategory === 'traffic' ? isLoadingTraffic : isLoadingNearby}
                 className="px-2.5 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 disabled:opacity-50 text-[11px] font-semibold text-white flex items-center gap-1.5 transition-all shadow"
                 title="Scan immediate surroundings around GPS coordinates"
               >
-                <span className={isLoadingNearby ? 'animate-spin' : ''}>🔄</span>
-                <span className="hidden sm:inline">{isLoadingNearby ? 'Scanning...' : 'Scan GPS'}</span>
+                <span className={(activeCategory === 'traffic' ? isLoadingTraffic : isLoadingNearby) ? 'animate-spin' : ''}>🔄</span>
+                <span className="hidden sm:inline">
+                  {(activeCategory === 'traffic' ? isLoadingTraffic : isLoadingNearby) ? 'Scanning...' : 'Refresh'}
+                </span>
               </button>
 
               {/* Close Button */}
@@ -381,9 +693,124 @@ export default function DrivingHUD({
             </div>
           </div>
 
-          {/* Places List */}
+          {/* List: Places or Traffic Incidents */}
           <div className="overflow-y-auto divide-y divide-white/5 py-2 pr-1 flex-1 space-y-2.5 scrollbar-thin scrollbar-thumb-white/20">
-            {categorizedPlaces[activeCategory].length === 0 ? (
+            {activeCategory === 'traffic' ? (
+              incidentsWithDistance.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <p className="text-3xl mb-2">🟢</p>
+                  <p className="text-sm font-bold text-white">Roads are Clear!</p>
+                  <p className="text-xs text-gray-400 mt-1">No traffic closures, accidents, or major delays detected within 25 km.</p>
+                  <button
+                    type="button"
+                    onClick={fetchTrafficIncidents}
+                    className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-lg"
+                  >
+                    <span>🔄</span> Check Again
+                  </button>
+                </div>
+              ) : (
+                incidentsWithDistance.map((inc) => {
+                  let incIcon = '⚠️';
+                  let incColor = 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10';
+                  if (inc.roadClosed || inc.type === 'roadClosure') {
+                    incIcon = '⛔';
+                    incColor = 'text-rose-400 border-rose-500/40 bg-rose-500/10';
+                  } else if (inc.type === 'accident') {
+                    incIcon = '💥';
+                    incColor = 'text-red-400 border-red-500/40 bg-red-500/10';
+                  } else if (inc.type === 'roadwork') {
+                    incIcon = '🚧';
+                    incColor = 'text-amber-400 border-amber-500/40 bg-amber-500/10';
+                  } else if (inc.type === 'congestion') {
+                    incIcon = '🛑';
+                    incColor = 'text-rose-400 border-rose-500/40 bg-rose-500/10';
+                  }
+
+                  return (
+                    <div
+                      key={inc.id}
+                      className="bg-white/5 hover:bg-white/10 p-3 rounded-2xl border border-white/5 transition-all flex flex-col gap-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base flex-shrink-0">{incIcon}</span>
+                            <h4 className="font-bold text-xs sm:text-sm text-white truncate">
+                              {inc.summary}
+                            </h4>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border ${incColor}`}>
+                              {inc.criticality}
+                            </span>
+                          </div>
+                          {inc.roadClosed && (
+                            <div className="mt-1 inline-flex items-center gap-1 bg-red-500/20 text-red-300 text-[10px] font-bold px-2 py-0.5 rounded border border-red-500/30">
+                              <span>⛔</span> ROAD CLOSED
+                            </div>
+                          )}
+                          <p className="text-[11px] text-gray-300 mt-1 line-clamp-2">
+                            {inc.description}
+                          </p>
+                          {inc.lengthMeters ? (
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              📏 Length: {(inc.lengthMeters / 1000).toFixed(1)} km
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-xs sm:text-sm font-black text-rose-400 tabular-nums">
+                            {formatDistance(inc.distanceKm)}
+                          </span>
+                          <span className="block text-[10px] text-gray-400">
+                            ~{inc.driveTimeMin} min
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Incident Action Buttons */}
+                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-white/5 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onFocusPlace?.({
+                              id: inc.id,
+                              name: inc.summary,
+                              address: inc.description,
+                              location: inc.location,
+                              type: PlaceType.ATTRACTION,
+                            });
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium text-[11px] flex items-center gap-1 transition-colors"
+                          title="Center incident on map"
+                        >
+                          <span>📍</span>
+                          <span>Map</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNavTargetPlace({
+                              id: inc.id,
+                              name: inc.summary,
+                              address: inc.description,
+                              location: inc.location,
+                              type: PlaceType.ATTRACTION,
+                            });
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center gap-1 shadow-md transition-all active:scale-95"
+                          title="Navigate / avoid via navigation app"
+                        >
+                          <span>🧭</span>
+                          <span>Nav</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )
+            ) : categorizedPlaces[activeCategory].length === 0 ? (
               <div className="text-center py-8 text-gray-400">
                 <p className="text-2xl mb-2">🔎</p>
                 <p className="text-xs font-semibold">No {activeCategory} stops currently listed along this leg.</p>

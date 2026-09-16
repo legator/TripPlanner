@@ -127,7 +127,7 @@ export default function TripPlanView({
         {onStartDriving && (
           <button
             type="button"
-            onClick={() => onStartDriving(selectedDay !== null ? selectedDay : 0)}
+            onClick={() => onStartDriving(selectedDay !== null ? selectedDay : undefined)}
             disabled={isPlanning}
             className="py-2.5 px-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all transform active:scale-[0.99] truncate"
             title="Launch live in-app driving follow mode with HUD"

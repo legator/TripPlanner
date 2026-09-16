@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useHereMaps } from './HereMapsProvider';
-import { DayPlan, Waypoint, Place } from '@/lib/types';
+import { DayPlan, Waypoint, Place, TrafficIncident } from '@/lib/types';
 import { DAY_COLORS, MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/lib/constants';
 import { decodePolyline } from '@/lib/tripGpxExport';
 import { callHereIsoline } from '@/lib/providers/here';
@@ -58,9 +58,15 @@ export default function HereMapView({
   const { isLoaded, loadError } = useHereMaps();
   const onAddWaypointRef = useRef(onAddWaypoint);
   const [showTraffic, setShowTraffic] = useState(false);
+  const [trafficIncidents, setTrafficIncidents] = useState<TrafficIncident[]>([]);
+  const [loadingTraffic, setLoadingTraffic] = useState(false);
   const [isolinePoints, setIsolinePoints] = useState<{lat: number, lng: number}[] | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const trafficLayerRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const trafficIncidentsGroupRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const trafficBubbleRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const isolinePolygonRef = useRef<any>(null);
   const onSetStartRef = useRef(onSetStart);
@@ -100,6 +106,10 @@ export default function HereMapView({
 
     objectsGroupRef.current = new H.map.Group();
     map.addObject(objectsGroupRef.current);
+
+    const incidentsGroup = new H.map.Group();
+    map.addObject(incidentsGroup);
+    trafficIncidentsGroupRef.current = incidentsGroup;
 
     // Click to add waypoint
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -145,15 +155,143 @@ export default function HereMapView({
     return () => resizeObserver.disconnect();
   }, [isLoaded]);
 
-  // Traffic layer toggle
+  // Traffic layer & Incidents toggle
   useEffect(() => {
     if (!mapInstanceRef.current || !trafficLayerRef.current) return;
-    if (showTraffic) {
-      mapInstanceRef.current.addLayer(trafficLayerRef.current);
-    } else {
+    const H = window.H;
+
+    if (!showTraffic) {
       mapInstanceRef.current.removeLayer(trafficLayerRef.current);
+      trafficIncidentsGroupRef.current?.removeAll();
+      if (trafficBubbleRef.current && uiRef.current) {
+        uiRef.current.removeBubble(trafficBubbleRef.current);
+        trafficBubbleRef.current = null;
+      }
+      setTrafficIncidents([]);
+      return;
     }
-  }, [showTraffic]);
+
+    // Turn on vector traffic flow layer
+    mapInstanceRef.current.addLayer(trafficLayerRef.current);
+
+    let isSubscribed = true;
+    setLoadingTraffic(true);
+
+    const fetchIncidents = async () => {
+      try {
+        let apiUrl = '';
+        if (tripPlan?.overviewPolyline) {
+          apiUrl = `/api/traffic/incidents?corridor=${encodeURIComponent(tripPlan.overviewPolyline)}&radius=300&limit=60`;
+        } else if (waypoints.length > 0) {
+          apiUrl = `/api/traffic/incidents?lat=${waypoints[0].location.lat}&lng=${waypoints[0].location.lng}&radius=35000&limit=60`;
+        } else {
+          const center = mapInstanceRef.current.getCenter();
+          apiUrl = `/api/traffic/incidents?lat=${center.lat}&lng=${center.lng}&radius=35000&limit=60`;
+        }
+
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error('Failed to fetch incidents');
+        const data = await res.json();
+        if (!isSubscribed) return;
+
+        const incidents: TrafficIncident[] = data.incidents || [];
+        setTrafficIncidents(incidents);
+
+        trafficIncidentsGroupRef.current?.removeAll();
+
+        incidents.forEach((incident) => {
+          let icon = '⚠️';
+          let label = 'Hazard';
+          let color = '#eab308'; // yellow
+
+          if (incident.type === 'roadClosure' || incident.roadClosed) {
+            icon = '⛔';
+            label = 'Road Closed';
+            color = '#ef4444';
+          } else if (incident.type === 'accident') {
+            icon = '💥';
+            label = 'Accident';
+            color = '#dc2626';
+          } else if (incident.type === 'roadwork') {
+            icon = '🚧';
+            label = 'Roadwork';
+            color = '#f59e0b';
+          } else if (incident.type === 'congestion') {
+            icon = '🛑';
+            label = 'Congestion';
+            color = '#e11d48';
+          }
+
+          const isCritical = incident.criticality === 'critical' || incident.roadClosed;
+
+          const markerEl = document.createElement('div');
+          markerEl.style.cssText = 'position:relative;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+          markerEl.innerHTML = `
+            <div style="position:absolute;width:34px;height:34px;border-radius:50%;background:${color}40;${isCritical ? 'animation:ping 1.8s cubic-bezier(0,0,0.2,1) infinite;' : ''}"></div>
+            <div style="width:26px;height:26px;border-radius:50%;background:#09090b;border:2.5px solid ${color};color:#ffffff;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 3px 8px rgba(0,0,0,0.6);position:relative;z-index:2;">
+              ${icon}
+            </div>
+          `;
+
+          const domIcon = new H.map.DomIcon(markerEl);
+          const marker = new H.map.DomMarker(
+            { lat: incident.location.lat, lng: incident.location.lng },
+            { icon: domIcon }
+          );
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          marker.addEventListener('tap', (evt: any) => {
+            evt.stopPropagation();
+            if (trafficBubbleRef.current && uiRef.current) {
+              uiRef.current.removeBubble(trafficBubbleRef.current);
+            }
+
+            const bubbleEl = document.createElement('div');
+            bubbleEl.style.cssText = 'max-width:270px;padding:8px 10px;font-family:system-ui,-apple-system,sans-serif;color:#18181b;';
+            bubbleEl.innerHTML = `
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+                <span style="font-weight:700;font-size:13px;color:#09090b;display:flex;align-items:center;gap:5px;">
+                  <span style="font-size:15px;">${icon}</span>
+                  <span>${label}</span>
+                </span>
+                <span style="font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:9999px;background:${color}20;color:${color};border:1px solid ${color}40;">
+                  ${incident.criticality}
+                </span>
+              </div>
+              ${incident.roadClosed ? '<div style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;margin-bottom:6px;display:flex;align-items:center;gap:4px;"><span>⛔</span><span>ROAD CLOSED</span></div>' : ''}
+              <p style="margin:0 0 5px;font-size:12px;font-weight:600;color:#18181b;line-height:1.35;">
+                ${incident.summary}
+              </p>
+              ${incident.description && incident.description !== incident.summary ? `<p style="margin:0 0 6px;font-size:11px;color:#52525b;line-height:1.3;">${incident.description}</p>` : ''}
+              ${incident.lengthMeters ? `<div style="font-size:11px;color:#71717a;margin-bottom:3px;">📏 Length: ${(incident.lengthMeters / 1000).toFixed(1)} km (${(incident.lengthMeters * 0.000621371).toFixed(1)} mi)</div>` : ''}
+              ${incident.endTime ? `<div style="font-size:10px;color:#a1a1aa;">⏱️ Until: ${new Date(incident.endTime).toLocaleDateString()}</div>` : ''}
+            `;
+
+            const bubble = new H.ui.InfoBubble(
+              { lat: incident.location.lat, lng: incident.location.lng },
+              { content: bubbleEl }
+            );
+            uiRef.current?.addBubble(bubble);
+            trafficBubbleRef.current = bubble;
+          });
+
+          trafficIncidentsGroupRef.current?.addObject(marker);
+        });
+      } catch (err) {
+        console.warn('HERE Traffic incidents load error:', err);
+      } finally {
+        if (isSubscribed) {
+          setLoadingTraffic(false);
+        }
+      }
+    };
+
+    fetchIncidents();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [showTraffic, tripPlan, waypoints]);
 
   // Render Isoline Polygon
   useEffect(() => {
@@ -541,14 +679,25 @@ export default function HereMapView({
           <button
             type="button"
             onClick={() => setShowTraffic(!showTraffic)}
-            className={`flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg shadow-md font-medium text-xs md:text-sm transition-colors ${
+            className={`flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg shadow-md font-medium text-xs md:text-sm transition-all ${
               showTraffic 
-                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20' 
                 : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
             }`}
           >
             <span>🚥</span>
-            <span>{showTraffic ? 'Hide Traffic' : 'Show Traffic'}</span>
+            <span>
+              {showTraffic
+                ? loadingTraffic
+                  ? 'Loading Alerts...'
+                  : trafficIncidents.length > 0
+                  ? `Traffic (${trafficIncidents.length})`
+                  : 'Traffic (Clear)'
+                : 'Show Traffic'}
+            </span>
+            {loadingTraffic && (
+              <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin ml-0.5" />
+            )}
           </button>
         </div>
       )}
