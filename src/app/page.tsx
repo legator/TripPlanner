@@ -17,10 +17,15 @@ import { decodeTripFromURL, loadTripFromShareParam } from '@/lib/tripShare';
 import UpdateTripModal, { TripUpdateMode } from '@/components/UpdateTripModal';
 import DrivingHUD from '@/components/DrivingHUD';
 import { LiveDrivingPosition, watchCurrentPosition } from '@/lib/location';
-import { findActiveTripDayAndTarget } from '@/lib/routeProgress';
+import { findActiveTripDayAndTarget, findUpcomingStopOnDay } from '@/lib/routeProgress';
 import { requestScreenWakeLock, releaseScreenWakeLock } from '@/lib/wakeLock';
 import { generateUUID } from '@/lib/uuid';
 import { format } from 'date-fns';
+import MinimizedDrivingBar from '@/components/MinimizedDrivingBar';
+import RateLimitBanner from '@/components/RateLimitBanner';
+import ApiStatusModal from '@/components/ApiStatusModal';
+import { recordApiCall } from '@/lib/apiTracker';
+import { setDrivingStatusBar, updateDrivingNotification, clearDrivingNotification } from '@/lib/drivingNotification';
 import type { UserEdits } from '@/lib/tripPlanEditor';
 import type { SavedTrip } from '@/lib/savedTrips';
 
@@ -40,6 +45,8 @@ export default function Home() {
   const [mapProvider, setMapProvider] = useState<MapProviderChoice | null | undefined>(null);
   const [focusedDrivingPlace, setFocusedDrivingPlace] = useState<Place | null>(null);
   const [mobileTab, setMobileTab] = useState<'sidebar' | 'map'>('sidebar');
+  const [isDrivingMinimized, setIsDrivingMinimized] = useState(false);
+  const [isApiStatusModalOpen, setIsApiStatusModalOpen] = useState(false);
 
   // Accumulated waypoints used for the active plan (includes search-added stops)
   const planWaypointsRef = useRef<Waypoint[]>([]);
@@ -138,6 +145,7 @@ export default function Home() {
       });
 
       const data = await response.json();
+      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to plan trip');
@@ -250,6 +258,7 @@ export default function Home() {
         body: JSON.stringify({ waypoints: currentPlanWaypoints, settings, provider: mapProvider }),
       });
       const data = await response.json();
+      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
       if (!response.ok) throw new Error(data.error || 'Failed to re-plan trip');
 
       // Re-apply user edits (rest days, day-end choices) on the fresh plan
@@ -305,14 +314,19 @@ export default function Home() {
       setSelectedDay(finalDay);
       setAutoFollow(true);
       setIsDrivingMode(true);
+      setIsDrivingMinimized(false);
       setMobileTab('map');
+      setDrivingStatusBar(true, false);
     },
     [tripPlan, drivingPosition, selectedDay]
   );
 
   const handleExitDriving = useCallback(() => {
     setIsDrivingMode(false);
+    setIsDrivingMinimized(false);
     setFocusedDrivingPlace(null);
+    setDrivingStatusBar(false);
+    clearDrivingNotification();
   }, []);
 
   const handleRecenter = useCallback(() => {
@@ -342,6 +356,35 @@ export default function Home() {
       setAutoFollow(false);
     }
   }, [isDrivingMode]);
+
+  // Synchronize Android status bar and background notification with driving status
+  useEffect(() => {
+    if (!isDrivingMode || !tripPlan) return;
+    const activeDay = tripPlan.days[drivingDayIndex] || tripPlan.days[0];
+    if (!activeDay) return;
+
+    setDrivingStatusBar(true, isDrivingMinimized);
+
+    const upcoming = findUpcomingStopOnDay(
+      activeDay,
+      drivingDayIndex,
+      drivingPosition ? { lat: drivingPosition.lat, lng: drivingPosition.lng } : null
+    );
+    if (upcoming && upcoming.targetStop) {
+      const speedKmh = drivingPosition?.speed != null ? Math.round(drivingPosition.speed * 3.6) : undefined;
+      const effectiveSpeed = speedKmh && speedKmh > 20 ? speedKmh : 70;
+      const driveTimeMin = Math.round((upcoming.distanceToTargetKm / effectiveSpeed) * 60);
+
+      updateDrivingNotification({
+        targetStopName: upcoming.targetStop.name,
+        distanceKm: upcoming.distanceToTargetKm,
+        driveTimeMin,
+        speedKmh,
+        dayIndex: drivingDayIndex,
+        totalDays: tripPlan.totalDays,
+      });
+    }
+  }, [isDrivingMode, isDrivingMinimized, drivingPosition, drivingDayIndex, tripPlan]);
 
   const handleConfirmTripUpdate = useCallback(async ({
     mode,
@@ -437,6 +480,7 @@ export default function Home() {
       });
 
       const data = await response.json();
+      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
       if (!response.ok) {
         throw new Error(data.error || 'Failed to update trip route');
       }
@@ -487,6 +531,7 @@ export default function Home() {
         onChangeMapProvider={() => setMapProvider(undefined)}
         onLoadSavedTrip={handleLoadSavedTrip}
         onToggleMobileMap={() => setMobileTab('map')}
+        onOpenApiStatus={() => setIsApiStatusModalOpen(true)}
       />
     </ErrorBoundary>
   );
@@ -517,28 +562,71 @@ export default function Home() {
   ) : null;
 
   const activeDrivingDay = tripPlan?.days[drivingDayIndex] || tripPlan?.days[0];
-  const drivingHudEl = isDrivingMode && tripPlan && activeDrivingDay ? (
-    <DrivingHUD
-      day={activeDrivingDay}
-      dayIndex={drivingDayIndex}
-      totalDays={tripPlan.totalDays}
-      currentPosition={drivingPosition}
-      autoFollow={autoFollow}
-      onRecenter={handleRecenter}
-      onExit={handleExitDriving}
-      wakeLockActive={wakeLockActive}
-      onFocusPlace={handleFocusPlace}
-      onAddStop={handleAddStopFromDriving}
-      mapProvider={mapProvider ?? undefined}
-      tripPlan={tripPlan}
-      onChangeDay={(newDay) => {
-        setDrivingDayIndex(newDay);
-        setSelectedDay(newDay);
+  const drivingHudEl =
+    isDrivingMode && !isDrivingMinimized && tripPlan && activeDrivingDay ? (
+      <DrivingHUD
+        day={activeDrivingDay}
+        dayIndex={drivingDayIndex}
+        totalDays={tripPlan.totalDays}
+        currentPosition={drivingPosition}
+        autoFollow={autoFollow}
+        onRecenter={handleRecenter}
+        onExit={handleExitDriving}
+        onMinimize={() => setIsDrivingMinimized(true)}
+        wakeLockActive={wakeLockActive}
+        onFocusPlace={handleFocusPlace}
+        onAddStop={handleAddStopFromDriving}
+        mapProvider={mapProvider ?? undefined}
+        tripPlan={tripPlan}
+        onChangeDay={(newDay) => {
+          setDrivingDayIndex(newDay);
+          setSelectedDay(newDay);
+        }}
+      />
+    ) : null;
+
+  const minimizedHudEl =
+    isDrivingMode && isDrivingMinimized && tripPlan && activeDrivingDay ? (
+      <MinimizedDrivingBar
+        day={activeDrivingDay}
+        dayIndex={drivingDayIndex}
+        totalDays={tripPlan.totalDays}
+        currentPosition={drivingPosition}
+        onExpand={() => {
+          setIsDrivingMinimized(false);
+          setMobileTab('map');
+        }}
+        onExit={handleExitDriving}
+      />
+    ) : null;
+
+  const rateLimitBannerEl = (
+    <RateLimitBanner
+      error={error}
+      activeProvider={mapProvider === 'here' ? 'here' : 'google'}
+      onSwitchProvider={(nextProv) => {
+        handlePickProvider(nextProv);
+        setError(null);
+      }}
+      onRetry={() => handlePlanTrip()}
+      onOpenStatusModal={() => setIsApiStatusModalOpen(true)}
+      onDismiss={() => setError(null)}
+    />
+  );
+
+  const apiStatusModalEl = (
+    <ApiStatusModal
+      isOpen={isApiStatusModalOpen}
+      onClose={() => setIsApiStatusModalOpen(false)}
+      activeProvider={mapProvider === 'here' ? 'here' : 'google'}
+      onSwitchProvider={(nextProv) => {
+        handlePickProvider(nextProv);
+        setIsApiStatusModalOpen(false);
       }}
     />
-  ) : null;
+  );
 
-  const mobileMapControls = !isDrivingMode && (
+  const mobileMapControls = (!isDrivingMode || isDrivingMinimized) && (
     <div className="md:hidden absolute bottom-5 left-4 right-4 z-20 pointer-events-none flex flex-col gap-2 items-center safe-pb">
       {tripPlan && (
         <div className="pointer-events-auto bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white text-[11px] font-semibold py-1.5 px-3.5 rounded-full border border-white/10 shadow-lg flex items-center gap-2 animate-fadeIn">
@@ -572,13 +660,13 @@ export default function Home() {
     </div>
   );
 
-  const sidebarContainerClass = isDrivingMode
+  const sidebarContainerClass = isDrivingMode && !isDrivingMinimized
     ? 'hidden'
     : mobileTab === 'sidebar'
     ? 'w-full h-full flex flex-col md:w-[390px] lg:w-[420px] flex-shrink-0'
     : 'hidden md:flex md:w-[390px] lg:w-[420px] flex-shrink-0 h-full';
 
-  const mapContainerClass = isDrivingMode
+  const mapContainerClass = isDrivingMode && !isDrivingMinimized
     ? 'flex-1 relative w-full h-full overflow-hidden'
     : mobileTab === 'map'
     ? 'flex-1 relative w-full h-full overflow-hidden'
@@ -588,6 +676,9 @@ export default function Home() {
     return (
       <HereMapsProvider>
         <div className="flex h-screen h-[100dvh] w-screen overflow-hidden bg-gray-100 relative">
+          <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
+            {rateLimitBannerEl}
+          </div>
           <div className={sidebarContainerClass}>
             {sidebarEl}
           </div>
@@ -609,8 +700,10 @@ export default function Home() {
             </ErrorBoundary>
             {mobileMapControls}
             {drivingHudEl}
+            {minimizedHudEl}
           </div>
           {updateModalEl}
+          {apiStatusModalEl}
         </div>
       </HereMapsProvider>
     );
@@ -619,6 +712,9 @@ export default function Home() {
   return (
     <GoogleMapsProvider>
       <div className="flex h-screen h-[100dvh] w-screen overflow-hidden bg-gray-100 relative">
+        <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
+          {rateLimitBannerEl}
+        </div>
         <div className={sidebarContainerClass}>
           {sidebarEl}
         </div>
@@ -640,8 +736,10 @@ export default function Home() {
           </ErrorBoundary>
           {mobileMapControls}
           {drivingHudEl}
+          {minimizedHudEl}
         </div>
         {updateModalEl}
+        {apiStatusModalEl}
       </div>
     </GoogleMapsProvider>
   );

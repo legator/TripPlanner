@@ -15,6 +15,7 @@ interface DrivingHUDProps {
   autoFollow: boolean;
   onRecenter: () => void;
   onExit: () => void;
+  onMinimize?: () => void;
   wakeLockActive: boolean;
   onFocusPlace?: (place: Place | null) => void;
   onAddStop?: (place: Place) => void;
@@ -36,6 +37,7 @@ export default function DrivingHUD({
   autoFollow,
   onRecenter,
   onExit,
+  onMinimize,
   wakeLockActive,
   onFocusPlace,
   onAddStop,
@@ -435,6 +437,18 @@ export default function DrivingHUD({
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     Awake
                   </span>
+                )}
+
+                {onMinimize && (
+                  <button
+                    type="button"
+                    onClick={onMinimize}
+                    className="text-[10px] bg-white/10 hover:bg-white/20 text-blue-300 font-semibold px-2 py-0.5 rounded flex items-center gap-1 border border-blue-400/30 transition-colors"
+                    title="Minimize HUD to floating dock"
+                  >
+                    <span>🔽</span>
+                    <span>Mini</span>
+                  </button>
                 )}
               </div>
 
@@ -1044,6 +1058,21 @@ export default function DrivingHUD({
               </div>
             )}
           </div>
+
+          {/* Minimize Driving Mode Button */}
+          {onMinimize && (
+            <button
+              type="button"
+              onClick={onMinimize}
+              className="py-2.5 sm:py-3 px-3 sm:px-3.5 rounded-xl bg-gray-800/90 hover:bg-gray-700 text-white text-[11px] sm:text-xs font-bold shadow-xl border border-white/10 flex items-center gap-1.5 transition-all transform active:scale-95"
+              title="Minimize Driving Mode to floating dock while keeping GPS tracking active"
+            >
+              <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+              <span>Mini</span>
+            </button>
+          )}
 
           {/* Exit Driving Mode Button */}
           <button

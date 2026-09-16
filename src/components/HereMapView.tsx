@@ -180,17 +180,30 @@ export default function HereMapView({
 
     const fetchIncidents = async () => {
       try {
-        let apiUrl = '';
-        if (tripPlan?.overviewPolyline) {
-          apiUrl = `/api/traffic/incidents?corridor=${encodeURIComponent(tripPlan.overviewPolyline)}&radius=300&limit=60`;
+        let res: Response;
+        const activePolyline = tripPlan?.overviewPolyline;
+
+        if (activePolyline) {
+          res = await fetch('/api/traffic/incidents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              corridor: activePolyline,
+              radius: 300,
+              limit: 60,
+            }),
+          });
         } else if (waypoints.length > 0) {
-          apiUrl = `/api/traffic/incidents?lat=${waypoints[0].location.lat}&lng=${waypoints[0].location.lng}&radius=35000&limit=60`;
+          res = await fetch(
+            `/api/traffic/incidents?lat=${waypoints[0].location.lat}&lng=${waypoints[0].location.lng}&radius=35000&limit=60`
+          );
         } else {
           const center = mapInstanceRef.current.getCenter();
-          apiUrl = `/api/traffic/incidents?lat=${center.lat}&lng=${center.lng}&radius=35000&limit=60`;
+          res = await fetch(
+            `/api/traffic/incidents?lat=${center.lat}&lng=${center.lng}&radius=35000&limit=60`
+          );
         }
 
-        const res = await fetch(apiUrl);
         if (!res.ok) throw new Error('Failed to fetch incidents');
         const data = await res.json();
         if (!isSubscribed) return;

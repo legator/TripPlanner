@@ -93,6 +93,16 @@ async function callHereRouting(
 
   if (!response.ok || !data.routes?.[0]) {
     const notice = data.notices?.[0]?.title || data.title || 'Unknown error';
+    if (response.status === 429) {
+      throw new Error(
+        'HERE Maps rate limit exceeded (HTTP 429: Too Many Requests). Please wait a moment or switch to Google Maps in settings.'
+      );
+    }
+    if (response.status === 403) {
+      throw new Error(
+        `HERE Maps API quota or permission error (HTTP 403: ${notice}). Quota may be exhausted. You can switch to Google Maps in settings.`
+      );
+    }
     if (response.status === 404 || notice.toLowerCase().includes('no route')) {
       throw new Error('No driving route found between the selected places.');
     }
