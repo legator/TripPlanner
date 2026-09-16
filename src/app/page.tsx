@@ -21,11 +21,12 @@ import { findActiveTripDayAndTarget, findUpcomingStopOnDay } from '@/lib/routePr
 import { requestScreenWakeLock, releaseScreenWakeLock } from '@/lib/wakeLock';
 import { generateUUID } from '@/lib/uuid';
 import { format } from 'date-fns';
+import { Capacitor } from '@capacitor/core';
 import MinimizedDrivingBar from '@/components/MinimizedDrivingBar';
 import RateLimitBanner from '@/components/RateLimitBanner';
 import ApiStatusModal from '@/components/ApiStatusModal';
 import { recordApiCall } from '@/lib/apiTracker';
-import { setDrivingStatusBar, updateDrivingNotification, clearDrivingNotification } from '@/lib/drivingNotification';
+import { setDrivingStatusBar, updateDrivingNotification, clearDrivingNotification, setExitNavigationHandler } from '@/lib/drivingNotification';
 import type { UserEdits } from '@/lib/tripPlanEditor';
 import type { SavedTrip } from '@/lib/savedTrips';
 
@@ -329,6 +330,13 @@ export default function Home() {
     clearDrivingNotification();
   }, []);
 
+  // Wire Android notification "Exit navigation" action to exit driving mode
+  useEffect(() => {
+    setExitNavigationHandler(() => {
+      handleExitDriving();
+    });
+  }, [handleExitDriving]);
+
   const handleRecenter = useCallback(() => {
     setAutoFollow(true);
     setFocusedDrivingPlace(null);
@@ -572,7 +580,11 @@ export default function Home() {
         autoFollow={autoFollow}
         onRecenter={handleRecenter}
         onExit={handleExitDriving}
-        onMinimize={() => setIsDrivingMinimized(true)}
+        onMinimize={
+          Capacitor.isNativePlatform()
+            ? () => setIsDrivingMinimized(true)
+            : undefined
+        }
         wakeLockActive={wakeLockActive}
         onFocusPlace={handleFocusPlace}
         onAddStop={handleAddStopFromDriving}
@@ -586,7 +598,7 @@ export default function Home() {
     ) : null;
 
   const minimizedHudEl =
-    isDrivingMode && isDrivingMinimized && tripPlan && activeDrivingDay ? (
+    isDrivingMode && isDrivingMinimized && Capacitor.isNativePlatform() && tripPlan && activeDrivingDay ? (
       <MinimizedDrivingBar
         day={activeDrivingDay}
         dayIndex={drivingDayIndex}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { DayPlan, Place, PlaceType, TrafficIncident, TripPlan } from '@/lib/types';
 import { LiveDrivingPosition, calculateHaversineDistanceKm, getNavigationAppUrl } from '@/lib/location';
 import { getOrderedDayTargetStops, findUpcomingStopOnDay, findActiveTripDayAndTarget, DayTargetStop } from '@/lib/routeProgress';
@@ -47,7 +48,7 @@ export default function DrivingHUD({
 }: DrivingHUDProps) {
   const [activeCategory, setActiveCategory] = useState<QuickStopCategory | 'traffic' | null>(null);
   const [showNavMenu, setShowNavMenu] = useState(false);
-  const [livePlaces, setLivePlaces] = useState<{ [key in QuickStopCategory]: PlaceWithDistance[] }>({
+  const [livePlaces, setLivePlaces] = useState<{ [key in QuickStopCategory]: Place[] }>({
     gas: [],
     food: [],
     rest: [],
@@ -290,55 +291,113 @@ export default function DrivingHUD({
     );
   }, [incidentsWithDistance, dismissedIncidents]);
 
-  // Fetch live nearby POIs around current GPS coordinates
-  const fetchNearbyPOIs = async (category: QuickStopCategory) => {
-    const coords = currentPosition
-      ? { lat: currentPosition.lat, lng: currentPosition.lng }
-      : day.startLocation.location;
+  const lastFetchedPOICoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const isScanningPOIsRef = useRef(false);
 
-    setIsLoadingNearby(true);
-    const typeMapping: Record<QuickStopCategory, string> = {
-      gas: 'gas_station',
-      food: 'restaurant',
-      rest: 'rest_stop',
-    };
+  // Fetch live nearby POIs around current GPS coordinates for all categories (gas, food, rest)
+  const fetchAllNearbyPOIs = useCallback(
+    async (targetCoords?: { lat: number; lng: number }, categoryToNotify?: QuickStopCategory) => {
+      const coords =
+        targetCoords ||
+        (currentPosition
+          ? { lat: currentPosition.lat, lng: currentPosition.lng }
+          : day.startLocation.location);
 
-    try {
-      const params = new URLSearchParams({
-        lat: String(coords.lat),
-        lng: String(coords.lng),
-        type: typeMapping[category],
-        radius: '30000', // 30 km radius
-      });
-      if (mapProvider) params.set('provider', mapProvider);
+      if (!coords || (coords.lat === 0 && coords.lng === 0)) return;
+      if (isScanningPOIsRef.current) return;
+      isScanningPOIsRef.current = true;
+      setIsLoadingNearby(true);
 
-      const res = await fetch(`/api/places/nearby?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.places && Array.isArray(data.places)) {
+      const typeMapping: Record<QuickStopCategory, string> = {
+        gas: 'gas_station',
+        food: 'restaurant',
+        rest: 'rest_stop',
+      };
+
+      try {
+        const categories: QuickStopCategory[] = categoryToNotify
+          ? [categoryToNotify]
+          : ['gas', 'food', 'rest'];
+
+        const results = await Promise.allSettled(
+          categories.map(async (category) => {
+            const params = new URLSearchParams({
+              lat: String(coords.lat),
+              lng: String(coords.lng),
+              type: typeMapping[category],
+              radius: '30000', // 30 km radius
+            });
+            if (mapProvider) params.set('provider', mapProvider);
+
+            const res = await fetch(`/api/places/nearby?${params.toString()}`);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.places && Array.isArray(data.places)) {
+                return { category, places: data.places as Place[] };
+              }
+            }
+            return { category, places: [] as Place[] };
+          })
+        );
+
+        const updatedCategories: Partial<{ [key in QuickStopCategory]: Place[] }> = {};
+        results.forEach((r) => {
+          if (r.status === 'fulfilled' && r.value.places.length > 0) {
+            updatedCategories[r.value.category] = r.value.places;
+          }
+        });
+
+        if (Object.keys(updatedCategories).length > 0) {
           setLivePlaces((prev) => ({
             ...prev,
-            [category]: data.places,
+            ...updatedCategories,
           }));
-          showNotice(`Found ${data.places.length} nearby ${category === 'gas' ? 'gas stations' : category === 'food' ? 'restaurants' : 'rest stops'}`);
+
+          if (categoryToNotify && updatedCategories[categoryToNotify]) {
+            showNotice(
+              `Found ${updatedCategories[categoryToNotify]!.length} nearby ${
+                categoryToNotify === 'gas'
+                  ? 'gas stations'
+                  : categoryToNotify === 'food'
+                  ? 'restaurants & cafes'
+                  : 'rest stops'
+              }`
+            );
+          }
         }
+      } catch (err) {
+        console.warn('Auto-scan nearby POIs failed:', err);
+      } finally {
+        setIsLoadingNearby(false);
+        isScanningPOIsRef.current = false;
       }
-    } catch (err) {
-      console.error('Failed to fetch nearby POIs:', err);
-      showNotice('Unable to scan live area right now');
-    } finally {
-      setIsLoadingNearby(false);
+    },
+    [currentPosition, day.startLocation.location, mapProvider, showNotice]
+  );
+
+  // Auto-scan live nearby POIs immediately on drive start and whenever car moves >= 2.5 km
+  useEffect(() => {
+    const lat = currentPosition?.lat ?? day.startLocation.location.lat;
+    const lng = currentPosition?.lng ?? day.startLocation.location.lng;
+    if (!lat || !lng) return;
+
+    if (lastFetchedPOICoordsRef.current) {
+      const dist = calculateHaversineDistanceKm({ lat, lng }, lastFetchedPOICoordsRef.current);
+      if (dist < 2.5) return;
     }
-  };
+
+    lastFetchedPOICoordsRef.current = { lat, lng };
+    fetchAllNearbyPOIs({ lat, lng });
+  }, [currentPosition?.lat, currentPosition?.lng, day.startLocation.location.lat, day.startLocation.location.lng, fetchAllNearbyPOIs]);
 
   const handleOpenCategory = (cat: QuickStopCategory) => {
     if (activeCategory === cat) {
       setActiveCategory(null);
     } else {
       setActiveCategory(cat);
-      // If we don't have many places for this category yet, auto-scan nearby
-      if (categorizedPlaces[cat].length < 2 && livePlaces[cat].length === 0) {
-        fetchNearbyPOIs(cat);
+      // Auto-scan if no live places fetched yet for this category
+      if (livePlaces[cat].length === 0) {
+        fetchAllNearbyPOIs(undefined, cat);
       }
     }
   };
@@ -439,14 +498,14 @@ export default function DrivingHUD({
                   </span>
                 )}
 
-                {onMinimize && (
+                {onMinimize && Capacitor.isNativePlatform() && (
                   <button
                     type="button"
                     onClick={onMinimize}
                     className="text-[10px] bg-white/10 hover:bg-white/20 text-blue-300 font-semibold px-2 py-0.5 rounded flex items-center gap-1 border border-blue-400/30 transition-colors"
-                    title="Minimize HUD to floating dock"
+                    title="Minimize to floating PiP window"
                   >
-                    <span>🔽</span>
+                    <span>🗖</span>
                     <span>Mini</span>
                   </button>
                 )}
@@ -684,7 +743,7 @@ export default function DrivingHUD({
               {/* Refresh / Scan button */}
               <button
                 type="button"
-                onClick={() => (activeCategory === 'traffic' ? fetchTrafficIncidents() : fetchNearbyPOIs(activeCategory))}
+                onClick={() => (activeCategory === 'traffic' ? fetchTrafficIncidents() : fetchAllNearbyPOIs(undefined, activeCategory))}
                 disabled={activeCategory === 'traffic' ? isLoadingTraffic : isLoadingNearby}
                 className="px-2.5 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 disabled:opacity-50 text-[11px] font-semibold text-white flex items-center gap-1.5 transition-all shadow"
                 title="Scan immediate surroundings around GPS coordinates"
@@ -830,7 +889,7 @@ export default function DrivingHUD({
                 <p className="text-xs font-semibold">No {activeCategory} stops currently listed along this leg.</p>
                 <button
                   type="button"
-                  onClick={() => fetchNearbyPOIs(activeCategory)}
+                  onClick={() => fetchAllNearbyPOIs(undefined, activeCategory)}
                   className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-lg"
                 >
                   <span>📡</span> Search Live Around GPS
