@@ -139,6 +139,11 @@ TripPlanner/
 - `src/app/page.tsx` is the state root. Child components must not maintain shadow copies of trip state.
 - `planWaypointsRef` and `userEditsRef` in `page.tsx` persist user customizations across iterative re-plans. Preserve these refs when modifying the planning workflow.
 
+### G. Git & Version Control — Explicit User Approval Required
+- **NEVER commit or push without explicit approval**: The AI assistant must NEVER run `git commit`, `git push`, `git tag`, `git reset`, `git rebase`, or any remote modifying git operations unless the user explicitly requests or confirms it in the prompt.
+- **Working Tree Transparency**: Keep all modified and newly created files in the working directory so the user can inspect diffs prior to committing.
+- **Request Approval**: When work is completed, present a concise diff/summary of changes and ask for the user's explicit approval before staging or committing.
+
 ---
 
 ## 4. Key Workflows & Common Tasks

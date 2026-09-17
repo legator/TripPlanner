@@ -69,6 +69,7 @@ TripPlanner is a **cross-platform road-trip itinerary planner and real-time turn
 - **SSR Safety**: Google Maps (`google.*`), HERE Maps (`H.*`), `speechSynthesis`, `navigator.wakeLock`, and `@capacitor/*` are browser/device only. Guard all calls in `useEffect` or user event callbacks.
 - **Parallel Requests**: Use `Promise.all()` when fetching places, weather, and charging facilities for days.
 - **State Management**: Root state lives in `src/app/page.tsx`. `planWaypointsRef` and `userEditsRef` accumulate state across iterative re-plans.
+- **Git Approval Required**: Never run `git commit`, `git push`, or modifying git operations without explicit user confirmation. Always leave modified files in the working tree for review.
 
 ## Key Interfaces (quick reference)
 
