@@ -23,7 +23,7 @@ export function setExitNavigationHandler(handler: () => void) {
  * Configure Android status bar for Driving Mode.
  */
 export async function setDrivingStatusBar(isDriving: boolean, isMinimized: boolean = false) {
-  if (!Capacitor.isNativePlatform()) return;
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('StatusBar')) return;
 
   try {
     if (isDriving) {
