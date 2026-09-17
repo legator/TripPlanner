@@ -14,6 +14,54 @@ export interface Place {
   photoUrl?: string;
   vicinity?: string;
   isOpen?: boolean;
+  evDetails?: EVChargerDetails;
+  parkingDetails?: ParkingDetails;
+}
+
+export interface ParkingDetails {
+  facilityType?: 'garage' | 'lot' | 'underground' | 'rest_area' | 'park_and_ride' | 'street';
+  isHighwayRestStop?: boolean;
+  totalCapacity?: number;
+  availableSpots?: number;
+  openingHours?: string;
+  distanceMeters?: number;
+  ratesDescription?: string;
+}
+
+export interface EVChargerDetails {
+  totalStalls?: number;
+  availableStalls?: number;
+  maxPowerKW?: number;
+  connectors?: string[];
+  pricePerKWh?: number;
+  network?: string;
+  isFastCharger?: boolean;
+}
+
+export type EVConnectorType = 'CCS2' | 'CCS1' | 'CHAdeMO' | 'Type2' | 'Tesla_NACS' | 'Tesla_Supercharger';
+
+export interface EVProfile {
+  enabled: boolean;
+  batteryCapacityKWh: number;        // e.g. 77 kWh
+  currentChargePercent: number;      // e.g. 90%
+  consumptionWhPerKm: number;        // e.g. 175 Wh/km (standard highway)
+  maxChargingPowerKW: number;        // e.g. 150 kW DC Fast Charge
+  targetChargePercent: number;       // e.g. 80% (standard fast charge cutoff)
+  minArrivalChargePercent: number;   // e.g. 15% (safety buffer)
+  preferredConnectorTypes: EVConnectorType[];
+  kwhPrice?: number;                 // e.g. 0.45 per kWh
+}
+
+export interface EVStopInfo {
+  place: Place;
+  arrivalBatteryPercent: number;
+  departureBatteryPercent: number;
+  energyNeededKWh: number;
+  chargingMinutes: number;
+  chargingCost?: number;
+  chargerPowerKW?: number;
+  connectorType?: string;
+  isAvailable?: boolean;
 }
 
 export enum PlaceType {
@@ -27,6 +75,7 @@ export enum PlaceType {
   EV_CHARGING = 'ev_charging',
   CAMPGROUND = 'campground',
   REST_STOP = 'rest_stop',
+  PARKING = 'parking',
 }
 
 export interface Waypoint {
@@ -63,12 +112,15 @@ export interface TripSettings {
   useTrafficData: boolean;
   /** Primary mode of transport for routing (e.g., car, pedestrian, bicycle, scooter, truck) */
   transportMode: 'car' | 'pedestrian' | 'bicycle' | 'scooter' | 'truck' | 'bus';
+  /** Electric vehicle profile and charging preferences */
+  evProfile?: EVProfile;
 }
 
 export type ScheduleEventType =
   | 'checkout'
   | 'drive'
   | 'fuel'
+  | 'charging'
   | 'sightseeing'
   | 'lunch'
   | 'checkin'
@@ -118,9 +170,15 @@ export interface DayPlan {
   attractions: Place[];
   restaurants: Place[];
   evChargingStops: Place[];
+  evStopsDetailed?: EVStopInfo[];
   campgrounds: Place[];
+  parkingStops: Place[];
   /** Estimated fuel cost for this day's driving */
   estimatedFuelCost?: number;
+  /** Estimated EV charging cost for this day */
+  estimatedChargingCost?: number;
+  /** Estimated toll cost for this day's driving */
+  estimatedTollCost?: number;
   /** Array of encoded polyline segments (one per step) – decode individually */
   polylineSegments: string[];
   /** Timeline of the day */
@@ -139,6 +197,10 @@ export interface TripPlan {
   departureDate: string;
   /** Estimated total fuel cost for the entire trip */
   estimatedTotalFuelCost?: number;
+  /** Estimated total EV charging cost for the entire trip */
+  estimatedTotalChargingCost?: number;
+  /** Estimated total toll cost for the entire trip */
+  estimatedTotalTollCost?: number;
 }
 
 export interface PlanTripRequest {

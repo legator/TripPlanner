@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { DayPlan, Place, PlaceType, TrafficIncident, TripPlan } from '@/lib/types';
 import { LiveDrivingPosition, calculateHaversineDistanceKm, getNavigationAppUrl } from '@/lib/location';
-import { getOrderedDayTargetStops, findUpcomingStopOnDay, findActiveTripDayAndTarget, DayTargetStop } from '@/lib/routeProgress';
+import { getOrderedDayTargetStops, findUpcomingStopOnDay, findActiveTripDayAndTarget, checkRouteDeviation, DayTargetStop } from '@/lib/routeProgress';
+import { voiceGuidance } from '@/lib/voiceGuidance';
+import { saveDrivingSession } from '@/lib/driveSession';
+import { fetchWeather, WeatherAlert } from '@/lib/weather';
 
 export type QuickStopCategory = 'gas' | 'food' | 'rest';
 
@@ -16,10 +18,10 @@ interface DrivingHUDProps {
   autoFollow: boolean;
   onRecenter: () => void;
   onExit: () => void;
-  onMinimize?: () => void;
   wakeLockActive: boolean;
   onFocusPlace?: (place: Place | null) => void;
   onAddStop?: (place: Place) => void;
+  onReroute?: (fromLocation: { lat: number; lng: number }, targetStop: DayTargetStop) => void;
   mapProvider?: string;
   tripPlan?: TripPlan | null;
   onChangeDay?: (dayIndex: number) => void;
@@ -38,10 +40,10 @@ export default function DrivingHUD({
   autoFollow,
   onRecenter,
   onExit,
-  onMinimize,
   wakeLockActive,
   onFocusPlace,
   onAddStop,
+  onReroute,
   mapProvider,
   tripPlan,
   onChangeDay,
@@ -60,6 +62,8 @@ export default function DrivingHUD({
   const lastFetchedTrafficRef = useRef<{ lat: number; lng: number } | null>(null);
   const [navTargetPlace, setNavTargetPlace] = useState<Place | null>(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [activeWeatherAlert, setActiveWeatherAlert] = useState<WeatherAlert | null>(null);
+  const weatherAnnouncedRef = useRef<boolean>(false);
 
   const showNotice = useCallback((msg: string) => {
     setActionSuccessMsg(msg);
@@ -80,6 +84,34 @@ export default function DrivingHUD({
   const [manualTargetIndex, setManualTargetIndex] = useState<number | null>(null);
   const prevTargetIdRef = useRef<string | null>(null);
   const hasAutoSyncedDayRef = useRef<boolean>(false);
+
+  // ── PiP (Picture-in-Picture) Mode Detection ──
+  const [isPip, setIsPip] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth <= 340 || window.innerHeight <= 400;
+  });
+
+  useEffect(() => {
+    const handlePipChange = (e: Event) => {
+      const custom = e as CustomEvent<{ isInPip: boolean }>;
+      if (custom.detail?.isInPip != null) {
+        setIsPip(custom.detail.isInPip);
+      }
+    };
+
+    const handleResize = () => {
+      const small = window.innerWidth <= 340 || window.innerHeight <= 400;
+      setIsPip((prev) => (small ? true : prev && window.innerWidth <= 450));
+    };
+
+    window.addEventListener('pipModeChange', handlePipChange);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('pipModeChange', handlePipChange);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   // Auto-sync active Day when entering drive mode based on vehicle's live GPS coordinates
   useEffect(() => {
@@ -159,13 +191,6 @@ export default function DrivingHUD({
       ) / 10
     : day.distanceKm;
 
-  // Rough ETA minutes to this immediate target
-  const effectiveSpeedKmh = speedKmh > 20 ? speedKmh : 70;
-  const etaMinutes = Math.round((distanceRemainingKm / effectiveSpeedKmh) * 60);
-  const etaHours = Math.floor(etaMinutes / 60);
-  const etaMins = etaMinutes % 60;
-  const etaFormatted = etaHours > 0 ? `${etaHours}h ${etaMins}m` : `${etaMins} min`;
-
   // Heading degrees and cardinal direction
   const heading = currentPosition?.heading != null ? Math.round(currentPosition.heading) : null;
   const getCardinalDirection = (deg: number | null) => {
@@ -174,6 +199,136 @@ export default function DrivingHUD({
     const arr = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
     return arr[val % 16];
   };
+
+  // ── Voice Guidance, Off-Route Deviation & Dynamic Traffic ETA ──
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => voiceGuidance.isVoiceEnabled());
+  const [isRerouting, setIsRerouting] = useState(false);
+  const [liveTrafficEta, setLiveTrafficEta] = useState<{
+    durationMinutes: number;
+    distanceKm: number;
+    trafficDelayMinutes: number;
+    etaArrivalTime: string;
+  } | null>(null);
+
+  const offRouteCountRef = useRef(0);
+  const lastRerouteTimeRef = useRef(0);
+  const lastEtaQueryTimeRef = useRef(0);
+  const announcedStopsRef = useRef<Set<string>>(new Set());
+
+  // Toggle voice prompts
+  const handleToggleVoice = () => {
+    const nextState = voiceGuidance.toggleVoice();
+    setIsVoiceEnabled(nextState);
+    showNotice(nextState ? '🔊 Voice Guidance Enabled' : '🔇 Voice Guidance Muted');
+  };
+
+  // Announce upcoming stops (2km, 500m, arrived)
+  useEffect(() => {
+    const distM = Math.round(distanceRemainingKm * 1000);
+    if (distM <= 250 && !announcedStopsRef.current.has(`${targetStop.id}_here`)) {
+      announcedStopsRef.current.add(`${targetStop.id}_here`);
+      voiceGuidance.announceUpcomingTurn(targetName, 50);
+    } else if (distM <= 550 && distM > 350 && !announcedStopsRef.current.has(`${targetStop.id}_500m`)) {
+      announcedStopsRef.current.add(`${targetStop.id}_500m`);
+      voiceGuidance.announceUpcomingTurn(targetName, 500);
+    } else if (distM <= 2100 && distM > 1800 && !announcedStopsRef.current.has(`${targetStop.id}_2k`)) {
+      announcedStopsRef.current.add(`${targetStop.id}_2k`);
+      voiceGuidance.announceUpcomingTurn(targetName, 2000);
+    }
+  }, [distanceRemainingKm, targetStop.id, targetName]);
+
+  // Persist driving progress to localStorage so user can close and reopen app seamlessly
+  useEffect(() => {
+    saveDrivingSession({
+      dayIndex,
+      targetStopId: targetStop.id,
+      manualTargetIndex,
+    });
+  }, [dayIndex, targetStop.id, manualTargetIndex]);
+
+  // Route deviation detection & automatic recalculation
+  useEffect(() => {
+    if (!currentPosition) return;
+    const deviation = checkRouteDeviation(
+      { lat: currentPosition.lat, lng: currentPosition.lng },
+      day,
+      200
+    );
+
+    if (deviation.isDeviated) {
+      offRouteCountRef.current += 1;
+      const now = Date.now();
+      if (offRouteCountRef.current >= 3 && now - lastRerouteTimeRef.current > 30000) {
+        lastRerouteTimeRef.current = now;
+        offRouteCountRef.current = 0;
+        setIsRerouting(true);
+        voiceGuidance.announceReroute();
+        showNotice('⚠️ Off route — Recalculating route...');
+
+        onReroute?.({ lat: currentPosition.lat, lng: currentPosition.lng }, targetStop);
+        setTimeout(() => setIsRerouting(false), 3500);
+      }
+    } else {
+      offRouteCountRef.current = 0;
+    }
+  }, [currentPosition, day, targetStop, onReroute, showNotice]);
+
+  // Query dynamic traffic ETA from routing provider
+  const fetchLiveTrafficEta = useCallback(async () => {
+    if (!currentPosition || !targetLocation) return;
+    const now = Date.now();
+    if (now - lastEtaQueryTimeRef.current < 45000) return;
+    lastEtaQueryTimeRef.current = now;
+
+    try {
+      const res = await fetch('/api/route/eta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin: { lat: currentPosition.lat, lng: currentPosition.lng },
+          destination: targetLocation,
+          provider: mapProvider,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLiveTrafficEta(data);
+      }
+    } catch (err) {
+      console.warn('Dynamic traffic ETA query error:', err);
+    }
+  }, [currentPosition, targetLocation, mapProvider]);
+
+  useEffect(() => {
+    fetchLiveTrafficEta();
+  }, [currentPosition?.lat, currentPosition?.lng, targetLocation?.lat, targetLocation?.lng, fetchLiveTrafficEta]);
+
+  // Fetch weather safety alerts for the target location on this day
+  useEffect(() => {
+    if (!targetLocation || !day.date) return;
+    fetchWeather(targetLocation.lat, targetLocation.lng, day.date, 1).then((results) => {
+      const today = results[0];
+      if (today && today.alerts && today.alerts.length > 0) {
+        const topAlert = today.alerts[0];
+        setActiveWeatherAlert(topAlert);
+        if (!weatherAnnouncedRef.current && isVoiceEnabled) {
+          weatherAnnouncedRef.current = true;
+          voiceGuidance.announceWeatherWarning(`${topAlert.title}. ${topAlert.message}`);
+        }
+      } else {
+        setActiveWeatherAlert(null);
+      }
+    });
+  }, [targetLocation, day.date, isVoiceEnabled]);
+
+  // Rough ETA minutes fallback vs dynamic traffic ETA
+  const effectiveSpeedKmh = speedKmh > 20 ? speedKmh : 70;
+  const etaMinutes =
+    liveTrafficEta?.durationMinutes ??
+    Math.round((distanceRemainingKm / effectiveSpeedKmh) * 60);
+  const etaHours = Math.floor(etaMinutes / 60);
+  const etaMins = etaMinutes % 60;
+  const etaFormatted = etaHours > 0 ? `${etaHours}h ${etaMins}m` : `${etaMins} min`;
 
   // Helper to compute distance and drive time from current GPS position (or start location)
   const computeDistanceAndDriveTime = useCallback(
@@ -215,10 +370,11 @@ export default function DrivingHUD({
     // Food / Restaurants / Cafes
     const food = processList(day.restaurants || [], livePlaces.food, PlaceType.RESTAURANT);
 
-    // Rest Stops / Places to relax (attractions, campgrounds, viewpoints, rest areas)
+    // Rest Stops / Places to relax (attractions, campgrounds, viewpoints, rest areas, parking)
     const restSource = [
       ...(day.attractions || []),
       ...(day.campgrounds || []),
+      ...(day.parkingStops || []),
     ];
     const rest = processList(restSource, livePlaces.rest, PlaceType.REST_STOP);
 
@@ -231,14 +387,30 @@ export default function DrivingHUD({
     return `${km.toFixed(1)} km`;
   };
 
-  // Fetch nearby traffic incidents from HERE Traffic API v7
+  // Fetch nearby traffic incidents from HERE Traffic API v7 matched along the actual route corridor
   const fetchTrafficIncidents = useCallback(async () => {
     const lat = currentPosition?.lat ?? day.startLocation.location.lat;
     const lng = currentPosition?.lng ?? day.startLocation.location.lng;
 
     setIsLoadingTraffic(true);
     try {
-      const res = await fetch(`/api/traffic/incidents?lat=${lat}&lng=${lng}&radius=25000&limit=25`);
+      let res: Response;
+      const corridorPolyline = day.polylineSegments?.[0] || tripPlan?.overviewPolyline;
+
+      if (corridorPolyline) {
+        res = await fetch('/api/traffic/incidents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            corridor: corridorPolyline,
+            radius: 300,
+            limit: 40,
+          }),
+        });
+      } else {
+        res = await fetch(`/api/traffic/incidents?lat=${lat}&lng=${lng}&radius=25000&limit=25`);
+      }
+
       if (res.ok) {
         const data = await res.json();
         setTrafficIncidents(data.incidents || []);
@@ -248,7 +420,7 @@ export default function DrivingHUD({
     } finally {
       setIsLoadingTraffic(false);
     }
-  }, [currentPosition, day.startLocation.location]);
+  }, [currentPosition, day.startLocation.location, day.polylineSegments, tripPlan?.overviewPolyline]);
 
   useEffect(() => {
     const lat = currentPosition?.lat ?? day.startLocation.location.lat;
@@ -428,6 +600,96 @@ export default function DrivingHUD({
   const closestFood = categorizedPlaces.food[0];
   const closestRest = categorizedPlaces.rest[0];
 
+  // First upcoming gas station on route for PiP mode & glance
+  const firstGasStation = useMemo(() => {
+    if (day.gasStops && day.gasStops.length > 0) {
+      const stop = day.gasStops[0];
+      const withDist = categorizedPlaces.gas.find((g) => g.id === stop.id);
+      if (withDist) return withDist;
+      const { distanceKm, driveTimeMin } = computeDistanceAndDriveTime(stop.location);
+      return {
+        ...stop,
+        distanceKm,
+        driveTimeMin,
+      };
+    }
+    if (categorizedPlaces.gas.length > 0) {
+      return categorizedPlaces.gas[0];
+    }
+    return null;
+  }, [day.gasStops, categorizedPlaces.gas, computeDistanceAndDriveTime]);
+
+  // ── PiP (Picture-in-Picture) Ultra-Compact View ──
+  // When in PiP mode, show ONLY essential navigation and the first gas station
+  if (isPip) {
+    return (
+      <div className="fixed inset-0 pointer-events-none z-50 flex flex-col justify-between p-2 font-sans select-none animate-fadeIn">
+        {/* Compact Navigation & Gas Station Card */}
+        <div className="pointer-events-auto bg-gray-950/95 text-white rounded-xl p-2 shadow-2xl border border-white/20 backdrop-blur-md flex flex-col gap-1.5 w-full">
+          {/* Main Navigation Row */}
+          <div className="flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <span className="text-base shrink-0">
+                {targetStop.isDayEnd ? '🏨' : '📍'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-xs font-bold text-white truncate leading-tight">
+                  {targetName}
+                </h2>
+                <p className="text-[11px] font-black text-blue-400 leading-tight flex items-center gap-1">
+                  <span>{distanceRemainingKm <= 0.25 ? 'Here!' : `${distanceRemainingKm} km`}</span>
+                  {distanceRemainingKm > 0.25 && <span>• ~{etaFormatted}</span>}
+                  {liveTrafficEta?.trafficDelayMinutes && liveTrafficEta.trafficDelayMinutes > 2 ? (
+                    <span className="text-[9px] bg-rose-500/40 text-rose-300 px-1 rounded font-bold">
+                      +{liveTrafficEta.trafficDelayMinutes}m
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+            </div>
+
+            {/* Live Speed */}
+            <div className="shrink-0 text-right">
+              <span className="text-[10px] font-mono font-bold bg-blue-900/80 text-blue-300 border border-blue-500/40 px-1.5 py-0.5 rounded-md">
+                {speedKmh} km/h
+              </span>
+            </div>
+          </div>
+
+          {/* First Gas Station Row */}
+          <div className="flex items-center justify-between gap-1 pt-1 border-t border-white/15 text-[10px] leading-tight">
+            <div className="flex items-center gap-1 min-w-0 flex-1">
+              <span className="text-xs shrink-0">⛽</span>
+              <span className="font-semibold text-amber-300 truncate">
+                {firstGasStation ? firstGasStation.name.split(',')[0] : 'No gas stop planned'}
+              </span>
+            </div>
+            {firstGasStation && (
+              <span className="text-[10px] font-mono font-bold text-gray-200 shrink-0">
+                {formatDistance(firstGasStation.distanceKm)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Minimal Recenter button if user moved map */}
+        {!autoFollow && (
+          <div className="pointer-events-auto self-end">
+            <button
+              type="button"
+              onClick={onRecenter}
+              className="px-2 py-1 bg-black/80 hover:bg-black text-white text-[10px] font-semibold rounded-lg border border-white/20 shadow flex items-center gap-1 backdrop-blur-sm"
+              title="Recenter map"
+            >
+              <span>🎯</span>
+              <span>Center</span>
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="absolute inset-0 pointer-events-none z-30 flex flex-col justify-between p-2 sm:p-4 md:p-5 select-none font-sans safe-pt safe-pb safe-pl safe-pr overflow-hidden">
       {/* ── TOP STACK: Target Info & Quick Stops Bar ── */}
@@ -498,16 +760,35 @@ export default function DrivingHUD({
                   </span>
                 )}
 
-                {onMinimize && Capacitor.isNativePlatform() && (
-                  <button
-                    type="button"
-                    onClick={onMinimize}
-                    className="text-[10px] bg-white/10 hover:bg-white/20 text-blue-300 font-semibold px-2 py-0.5 rounded flex items-center gap-1 border border-blue-400/30 transition-colors"
-                    title="Minimize to floating PiP window"
+                {/* Voice Guidance Toggle */}
+                <button
+                  type="button"
+                  onClick={handleToggleVoice}
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1 border transition-colors ${
+                    isVoiceEnabled
+                      ? 'bg-blue-600/30 text-blue-200 border-blue-400/40 hover:bg-blue-600/50'
+                      : 'bg-white/10 text-gray-400 border-white/10 hover:text-white hover:bg-white/20'
+                  }`}
+                  title={isVoiceEnabled ? 'Voice Guidance active (Click to mute)' : 'Voice Guidance muted (Click to enable)'}
+                >
+                  <span>{isVoiceEnabled ? '🔊' : '🔇'}</span>
+                  <span className="hidden xs:inline sm:inline">{isVoiceEnabled ? 'Voice' : 'Mute'}</span>
+                </button>
+
+                {isRerouting && (
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 border border-amber-400/30 animate-pulse">
+                    <span>🔄</span> Recalculating...
+                  </span>
+                )}
+
+                {activeWeatherAlert && (
+                  <span
+                    className="text-[10px] bg-rose-500/20 text-rose-300 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 border border-rose-400/30 truncate max-w-[140px] sm:max-w-[200px]"
+                    title={`${activeWeatherAlert.title}: ${activeWeatherAlert.message}`}
                   >
-                    <span>🗖</span>
-                    <span>Mini</span>
-                  </button>
+                    <span>{activeWeatherAlert.icon}</span>
+                    <span className="truncate">{activeWeatherAlert.title}</span>
+                  </span>
                 )}
               </div>
 
@@ -560,9 +841,20 @@ export default function DrivingHUD({
                 </>
               )}
             </p>
-            <p className="text-[10px] sm:text-[11px] text-gray-300 font-medium">
-              {distanceRemainingKm <= 0.25 ? 'Arrived' : `~${etaFormatted}`}
-            </p>
+            <div className="text-[10px] sm:text-[11px] text-gray-300 font-medium flex items-center justify-end gap-1">
+              {distanceRemainingKm <= 0.25 ? (
+                <span>Arrived</span>
+              ) : (
+                <>
+                  <span>~{etaFormatted}</span>
+                  {liveTrafficEta?.trafficDelayMinutes && liveTrafficEta.trafficDelayMinutes > 2 ? (
+                    <span className="text-[9px] bg-rose-500/25 text-rose-300 border border-rose-500/40 px-1 py-0.2 rounded font-bold">
+                      +{liveTrafficEta.trafficDelayMinutes}m
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1117,21 +1409,6 @@ export default function DrivingHUD({
               </div>
             )}
           </div>
-
-          {/* Minimize Driving Mode Button */}
-          {onMinimize && (
-            <button
-              type="button"
-              onClick={onMinimize}
-              className="py-2.5 sm:py-3 px-3 sm:px-3.5 rounded-xl bg-gray-800/90 hover:bg-gray-700 text-white text-[11px] sm:text-xs font-bold shadow-xl border border-white/10 flex items-center gap-1.5 transition-all transform active:scale-95"
-              title="Minimize Driving Mode to floating dock while keeping GPS tracking active"
-            >
-              <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-              <span>Mini</span>
-            </button>
-          )}
 
           {/* Exit Driving Mode Button */}
           <button

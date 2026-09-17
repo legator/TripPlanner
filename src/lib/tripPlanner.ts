@@ -2,6 +2,8 @@ import { Place, PlaceType, DayPlan, DaySegment, TripPlan, Waypoint, TripSettings
 import { FUEL_BUFFER_FACTOR, SEARCH_RADIUS } from './constants';
 import { addDays, format } from 'date-fns';
 import { getRoutingProvider, RouteLeg, RouteStep, NearbyPlace, MapProviderName } from './providers';
+import { fetchHereParking } from './providers/here';
+import { planDayEVStops, enrichEVStationDetails } from './evPlanner';
 
 // ─── Time helpers ───────────────────────────────────────────────────────────
 
@@ -24,6 +26,7 @@ function mapProviderType(type: string): PlaceType {
     case 'restaurant': return PlaceType.RESTAURANT;
     case 'electric_vehicle_charging_station': return PlaceType.EV_CHARGING;
     case 'campground': return PlaceType.CAMPGROUND;
+    case 'parking': return PlaceType.PARKING;
     default: return PlaceType.ATTRACTION;
   }
 }
@@ -135,7 +138,7 @@ export async function planTrip(
       // Parallel fetch of all place types
       const isLastDay = index === dailyGroups.length - 1;
 
-      const [gasStops, hotelSuggestions, attractions, restaurants, evChargingStops, campgrounds] =
+      const [gasStops, hotelSuggestions, attractions, restaurants, evChargingStops, campgrounds, parkingStops] =
         await Promise.all([
           findGasStationsAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider),
           isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'lodging', SEARCH_RADIUS.HOTEL, 5, preferredProvider),
@@ -143,15 +146,28 @@ export async function planTrip(
           findRestaurants(dayLegs, preferredProvider),
           findEvChargingAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider),
           isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'campground', SEARCH_RADIUS.CAMPGROUND, 3, preferredProvider),
+          findParkingAlongDay(dayLegs, preferredProvider),
         ]);
 
-      const estimatedFuelCost =
-        Math.round(
-          (dayDistanceKm / 100) *
-            (settings.fuelEfficiencyLPer100km ?? 8.0) *
-            (settings.fuelPricePerLiter ?? 1.8) *
-            10
-        ) / 10;
+      const isEV = !!settings.evProfile?.enabled;
+
+      const evPlan = isEV && settings.evProfile
+        ? planDayEVStops(dayDistanceKm, evChargingStops, settings.evProfile)
+        : null;
+
+      const estimatedFuelCost = isEV
+        ? 0
+        : Math.round(
+            (dayDistanceKm / 100) *
+              (settings.fuelEfficiencyLPer100km ?? 8.0) *
+              (settings.fuelPricePerLiter ?? 1.8) *
+              10
+          ) / 10;
+
+      const estimatedChargingCost = evPlan ? evPlan.totalChargingCost : 0;
+      const estimatedTollCost = Math.round(
+        dayLegs.reduce((acc, leg) => acc + (leg.tollCost ?? 0), 0) * 100
+      ) / 100;
 
       const polylineSegments = dayLegs.flatMap((leg) => leg.steps.map((s: RouteStep) => s.encodedPolyline));
 
@@ -201,8 +217,20 @@ export async function planTrip(
           icon: '🚗',
         });
 
-        // Add gas stop if one falls roughly in this segment
-        if (gasStops.length > 0 && i === Math.floor(numSegments / 2)) {
+        // Add refueling or EV charging stop if one falls roughly in this segment
+        if (isEV && evPlan && evPlan.evStopsDetailed.length > 0 && i === Math.floor(numSegments / 2)) {
+          for (const evStop of evPlan.evStopsDetailed) {
+            schedule.push({
+              type: 'charging',
+              time: cursor,
+              endTime: addMinutesToTime(cursor, evStop.chargingMinutes),
+              title: `⚡ Fast Charge: ${evStop.place.name.split(',')[0]} (${evStop.arrivalBatteryPercent}% → ${evStop.departureBatteryPercent}%)`,
+              durationMinutes: evStop.chargingMinutes,
+              icon: '⚡',
+            });
+            cursor = addMinutesToTime(cursor, evStop.chargingMinutes);
+          }
+        } else if (!isEV && gasStops.length > 0 && i === Math.floor(numSegments / 2)) {
           schedule.push({
             type: 'fuel',
             time: cursor,
@@ -299,9 +327,15 @@ export async function planTrip(
         hotelSuggestions,
         attractions,
         restaurants,
-        evChargingStops,
+        evChargingStops: evPlan && evPlan.evStopsDetailed.length > 0
+          ? evPlan.evStopsDetailed.map((s) => s.place)
+          : evChargingStops.map((s) => enrichEVStationDetails(s, settings.evProfile?.preferredConnectorTypes)),
+        evStopsDetailed: evPlan?.evStopsDetailed,
         campgrounds,
+        parkingStops,
         estimatedFuelCost,
+        estimatedChargingCost,
+        estimatedTollCost,
         polylineSegments,
         schedule,
         segments,
@@ -341,6 +375,7 @@ export async function planTrip(
         restaurants: prevDay.restaurants,
         evChargingStops: [],
         campgrounds: prevDay.campgrounds,
+        parkingStops: [],
         estimatedFuelCost: 0,
         polylineSegments: [],
         schedule: [
@@ -376,6 +411,14 @@ export async function planTrip(
     Math.round(
       dayPlans.reduce((sum, d) => sum + (d.estimatedFuelCost ?? 0), 0) * 10
     ) / 10;
+  const estimatedTotalChargingCost =
+    Math.round(
+      dayPlans.reduce((sum, d) => sum + (d.estimatedChargingCost ?? 0), 0) * 10
+    ) / 10;
+  const estimatedTotalTollCost =
+    Math.round(
+      dayPlans.reduce((sum, d) => sum + (d.estimatedTollCost ?? 0), 0) * 100
+    ) / 100;
 
   return {
     days: dayPlans,
@@ -386,6 +429,8 @@ export async function planTrip(
     overviewPolyline,
     departureDate: settings.departureDate,
     estimatedTotalFuelCost,
+    estimatedTotalChargingCost,
+    estimatedTotalTollCost,
   };
 }
 
@@ -529,6 +574,84 @@ async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number, pre
     const stations = await findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2, preferred);
     for (const s of stations) { if (!seen.has(s.id)) { seen.add(s.id); results.push(s); } }
   }
+  return results;
+}
+
+async function findParkingAlongDay(legs: RouteLeg[], preferred?: MapProviderName): Promise<Place[]> {
+  const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
+  if (totalKm < 25) return [];
+
+  // Sample points near toll segments or spaced at ~80km
+  const samplePoints: { lat: number; lng: number }[] = [];
+  for (const leg of legs) {
+    if ((leg.tollCost ?? 0) > 0 && leg.steps.length > 0) {
+      samplePoints.push(leg.steps[Math.floor(leg.steps.length / 2)].startLocation);
+    }
+  }
+
+  if (samplePoints.length === 0 || totalKm > 120) {
+    const routePoints = samplePointsAlongLegs(legs, 80);
+    for (const pt of routePoints) {
+      if (samplePoints.length < 3) samplePoints.push(pt);
+    }
+  }
+
+  if (samplePoints.length === 0) {
+    samplePoints.push(getMidpointOfLegs(legs));
+  }
+
+  const seen = new Set<string>();
+  const results: Place[] = [];
+
+  for (const point of samplePoints.slice(0, 3)) {
+    try {
+      if (preferred === 'google') {
+        const places = await findNearby(point, 'parking', SEARCH_RADIUS.HIGHWAY_REST_STOP, 2, preferred);
+        for (const p of places) {
+          if (!seen.has(p.id)) {
+            seen.add(p.id);
+            results.push({
+              ...p,
+              type: PlaceType.PARKING,
+              parkingDetails: {
+                facilityType: 'lot',
+                isHighwayRestStop: true,
+              },
+            });
+            if (results.length >= 5) break;
+          }
+        }
+      } else {
+        const hereParking = await fetchHereParking(point, SEARCH_RADIUS.HIGHWAY_REST_STOP, true);
+        for (const item of hereParking) {
+          if (!seen.has(item.id)) {
+            seen.add(item.id);
+            results.push({
+              id: item.id,
+              name: item.name,
+              address: item.address,
+              location: item.location,
+              type: PlaceType.PARKING,
+              vicinity: item.address,
+              isOpen: item.isOpen,
+              parkingDetails: {
+                facilityType: item.facilityType,
+                isHighwayRestStop: item.isHighwayRestStop,
+                totalCapacity: item.totalCapacity,
+                availableSpots: item.availableSpots,
+                distanceMeters: item.distanceMeters,
+              },
+            });
+            if (results.length >= 5) break;
+          }
+        }
+      }
+    } catch {
+      // Fallback silently if individual search fails
+    }
+    if (results.length >= 5) break;
+  }
+
   return results;
 }
 

@@ -164,6 +164,7 @@ export function toggleRestDay(plan: TripPlan, dayIndex: number): TripPlan {
       restaurants: day.restaurants,
       evChargingStops: [],
       campgrounds: day.campgrounds ?? [],
+      parkingStops: day.parkingStops ?? [],
       estimatedFuelCost: 0,
       polylineSegments: [],
       schedule: [
@@ -261,6 +262,7 @@ export function setDayEndAtSegment(
       gasStops: [],
       evChargingStops: [],
       campgrounds: [],
+      parkingStops: [],
       hotelSuggestions: [],
       attractions: [],
       restaurants: [],

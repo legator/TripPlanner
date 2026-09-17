@@ -4,6 +4,7 @@ import android.app.PictureInPictureParams;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.content.res.Configuration;
 import android.util.Rational;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.JSObject;
@@ -19,8 +20,29 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
     }
 
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().post(() -> {
+                getBridge().getWebView().evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('pipModeChange', { detail: { isInPip: " + isInPictureInPictureMode + " } }));",
+                    null
+                );
+            });
+        }
+    }
+
     @CapacitorPlugin(name = "PipPlugin")
     public static class PipPlugin extends Plugin {
+        @PluginMethod
+        public void isInPip(PluginCall call) {
+            JSObject ret = new JSObject();
+            boolean inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+                getActivity().isInPictureInPictureMode();
+            ret.put("isInPip", inPip);
+            call.resolve(ret);
+        }
         @PluginMethod
         public void enterPip(PluginCall call) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

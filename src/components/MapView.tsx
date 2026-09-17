@@ -487,6 +487,17 @@ export default function MapView({
           `${attr.rating ? `⭐ ${attr.rating}` : ''} ${attr.vicinity || attr.address}`
         );
       });
+
+      // Parking & highway rest stop markers
+      (day.parkingStops || []).slice(0, 4).forEach((parking) => {
+        createMarker(
+          parking.location,
+          '',
+          parking.parkingDetails?.isHighwayRestStop ? '🛑' : '🅿️',
+          parking.name,
+          `${parking.parkingDetails?.isHighwayRestStop ? 'Highway Rest Stop' : 'Parking'} • ${parking.vicinity || parking.address}`
+        );
+      });
     });
 
     if (!bounds.isEmpty()) {

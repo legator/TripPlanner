@@ -162,6 +162,7 @@ export const googleProvider: RoutingProvider = {
       cafe: ['cafe', 'coffee_shop'],
       rest_stop: ['rest_stop', 'park', 'tourist_attraction'],
       lodging: ['hotel', 'motel', 'lodging'],
+      parking: ['parking'],
     };
     const body = {
       includedTypes: typeMap[type] || [type],

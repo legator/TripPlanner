@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { TripPlan, DayPlan } from '@/lib/types';
+import TripLedgerModal from './TripLedgerModal';
 
 interface BudgetSummaryProps {
   tripPlan: TripPlan;
@@ -12,6 +13,7 @@ interface DayBudget {
   dayNumber: number;
   date: string;
   fuelCost: number;
+  tollCost: number;
   hotelCostRange: [number, number]; // [min, max] in €
   attractionCostRange: [number, number];
   restaurantCostRange: [number, number];
@@ -48,6 +50,7 @@ function priceLevelToRange(
 
 function computeDayBudget(day: DayPlan): DayBudget {
   const fuelCost = day.estimatedFuelCost ?? 0;
+  const tollCost = day.estimatedTollCost ?? 0;
 
   // Best hotel suggestion
   const bestHotel = day.hotelSuggestions[0];
@@ -68,13 +71,14 @@ function computeDayBudget(day: DayPlan): DayBudget {
     [0, 0]
   );
 
-  const totalMin = Math.round(fuelCost + hotelRange[0] + restaurantRange[0] + attractionCost[0]);
-  const totalMax = Math.round(fuelCost + hotelRange[1] + restaurantRange[1] + attractionCost[1]);
+  const totalMin = Math.round(fuelCost + tollCost + hotelRange[0] + restaurantRange[0] + attractionCost[0]);
+  const totalMax = Math.round(fuelCost + tollCost + hotelRange[1] + restaurantRange[1] + attractionCost[1]);
 
   return {
     dayNumber: day.dayNumber,
     date: day.date,
     fuelCost: Math.round(fuelCost),
+    tollCost: Math.round(tollCost),
     hotelCostRange: hotelRange,
     attractionCostRange: attractionCost,
     restaurantCostRange: restaurantRange,
@@ -85,11 +89,13 @@ function computeDayBudget(day: DayPlan): DayBudget {
 
 export default function BudgetSummary({ tripPlan }: BudgetSummaryProps) {
   const [expanded, setExpanded] = useState(false);
+  const [isLedgerOpen, setIsLedgerOpen] = useState(false);
 
   const budgets = tripPlan.days.map(computeDayBudget);
   const grandMin = budgets.reduce((s, b) => s + b.totalMin, 0);
   const grandMax = budgets.reduce((s, b) => s + b.totalMax, 0);
   const totalFuel = budgets.reduce((s, b) => s + b.fuelCost, 0);
+  const totalTolls = tripPlan.estimatedTotalTollCost ?? budgets.reduce((s, b) => s + b.tollCost, 0);
   const totalHotelMin = budgets.reduce((s, b) => s + b.hotelCostRange[0], 0);
   const totalHotelMax = budgets.reduce((s, b) => s + b.hotelCostRange[1], 0);
 
@@ -116,11 +122,17 @@ export default function BudgetSummary({ tripPlan }: BudgetSummaryProps) {
       {expanded && (
         <div className="border-t border-emerald-200 dark:border-emerald-700 px-3 pb-3 space-y-3">
           {/* Totals breakdown */}
-          <div className="grid grid-cols-3 gap-2 pt-3">
+          <div className={`grid ${totalTolls > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-2 pt-3`}>
             <div className="text-center">
               <p className="text-xs text-gray-500 dark:text-gray-400">⛽ Fuel</p>
               <p className="text-sm font-bold text-gray-800 dark:text-white">€{totalFuel}</p>
             </div>
+            {totalTolls > 0 && (
+              <div className="text-center">
+                <p className="text-xs text-gray-500 dark:text-gray-400">🛣️ Tolls</p>
+                <p className="text-sm font-bold text-amber-700 dark:text-amber-300">€{Math.round(totalTolls)}</p>
+              </div>
+            )}
             <div className="text-center">
               <p className="text-xs text-gray-500 dark:text-gray-400">🏨 Hotels</p>
               <p className="text-sm font-bold text-gray-800 dark:text-white">
@@ -137,7 +149,7 @@ export default function BudgetSummary({ tripPlan }: BudgetSummaryProps) {
           </div>
 
           <p className="text-xs text-gray-400 dark:text-gray-500 text-center italic">
-            Estimates per person · Actual costs vary · Attractions include up to 2/day
+            Estimates per person · Actual costs vary · Tolls calculated via HERE Routing
           </p>
 
           {/* Per-day table */}
@@ -148,8 +160,9 @@ export default function BudgetSummary({ tripPlan }: BudgetSummaryProps) {
                 className="flex items-center justify-between text-xs text-gray-700 dark:text-gray-300 py-1 border-b border-emerald-100 dark:border-emerald-800 last:border-0"
               >
                 <span className="font-medium w-12">Day {b.dayNumber}</span>
-                <span className="text-gray-400 flex-1">
+                <span className="text-gray-400 flex-1 truncate">
                   {b.fuelCost > 0 && `⛽€${b.fuelCost} `}
+                  {b.tollCost > 0 && `🛣️€${b.tollCost} `}
                   {b.hotelCostRange[1] > 0 && `🏨€${b.hotelCostRange[0]}–${b.hotelCostRange[1]} `}
                   {b.restaurantCostRange[1] > 0 && `🍽️€${b.restaurantCostRange[0]}–${b.restaurantCostRange[1]} `}
                 </span>
@@ -159,8 +172,29 @@ export default function BudgetSummary({ tripPlan }: BudgetSummaryProps) {
               </div>
             ))}
           </div>
+
+          {/* Open Full Ledger Button */}
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsLedgerOpen(true);
+              }}
+              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5"
+            >
+              <span>📊</span>
+              <span>Open Trip Ledger & Cost Splitter</span>
+            </button>
+          </div>
         </div>
       )}
+
+      <TripLedgerModal
+        isOpen={isLedgerOpen}
+        onClose={() => setIsLedgerOpen(false)}
+        tripPlan={tripPlan}
+      />
     </div>
   );
 }

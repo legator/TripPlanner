@@ -651,6 +651,16 @@ export default function HereMapView({
       day.attractions.slice(0, 3).forEach((attr) => {
         addMarker(attr.location.lat, attr.location.lng, '⭐', attr.name);
       });
+
+      // Parking & highway rest stops
+      (day.parkingStops || []).slice(0, 4).forEach((parking) => {
+        addMarker(
+          parking.location.lat,
+          parking.location.lng,
+          parking.parkingDetails?.isHighwayRestStop ? '🛑' : '🅿️',
+          parking.name
+        );
+      });
     });
 
     // Fit map to all points

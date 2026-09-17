@@ -39,6 +39,7 @@ interface SidebarProps {
   onSetStart?: (waypoint: Waypoint) => void;
   onToggleMobileMap?: () => void;
   onOpenApiStatus?: () => void;
+  onOpenCityParking?: () => void;
 }
 
 export default function Sidebar({
@@ -66,6 +67,7 @@ export default function Sidebar({
   onStartDriving,
   onSetStart,
   onToggleMobileMap,
+  onOpenCityParking,
 }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -307,6 +309,7 @@ export default function Sidebar({
             onOpenUpdateTripModal={onOpenUpdateTripModal}
             onStartDayFromLocation={onStartDayFromLocation}
             onStartDriving={onStartDriving}
+            onOpenCityParking={onOpenCityParking}
             isPlanning={isPlanning}
             maxDistanceKm={settings.maxDistancePerDayKm}
             maxDrivingMinutes={settings.maxDrivingMinutesPerDay}
