@@ -1,7 +1,7 @@
 import { TripSettings } from './types';
 
 export const DEFAULT_SETTINGS: TripSettings = {
-  maxDrivingMinutesPerDay: 420, // 8 hours
+  maxDrivingMinutesPerDay: 420, // 7 hours
   maxDistancePerDayKm: 800,    // ~600 km per day
   fuelRangeKm: 650,            // average car range on full tank
   departureDate: new Date().toISOString().split('T')[0],

@@ -1,14 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { planTrip } from '@/lib/tripPlanner';
-import { PlanTripRequest } from '@/lib/types';
+import { PlanTripRequestWithProvider } from '@/lib/types';
+import { validateWaypoints, validateAndClampSettings } from '@/lib/validation';
+import { getRedisClient } from '@/lib/redisClient';
 
-// ─── Simple in-memory rate limiter ──────────────────────────────────────────
-// Limits each IP to 10 planning requests per minute.
-// Note: in a multi-instance deployment use Redis or an edge KV store instead.
-
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 60_000;
+
+const localRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function cleanupLocal() {
+  const now = Date.now();
+  localRateLimitMap.forEach((v, k) => {
+    if (v.resetAt <= now) localRateLimitMap.delete(k);
+  });
+}
+
+function isLocalRateLimited(ip: string): boolean {
+  cleanupLocal();
+  const now = Date.now();
+  const entry = localRateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    localRateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  if (entry.count >= RATE_LIMIT) return true;
+  entry.count++;
+  return false;
+}
+
+async function isRateLimited(ip: string): Promise<boolean> {
+  const redis = await getRedisClient();
+  if (redis) {
+    try {
+      const key = `rl:plan:${ip}`;
+      const count = await redis.incr(key);
+      if (count === 1) await redis.expire(key, Math.ceil(RATE_WINDOW_MS / 1000));
+      return count > RATE_LIMIT;
+    } catch (err) {
+      console.warn('Rate limit Redis error, falling back to local:', err);
+    }
+  }
+  return isLocalRateLimited(ip);
+}
 
 function getClientIP(req: NextRequest): string {
   return (
@@ -18,34 +52,9 @@ function getClientIP(req: NextRequest): string {
   );
 }
 
-function cleanupRateLimitMap() {
-  const now = Date.now();
-  // Avoid `for ... of` destructuring which requires newer downlevelIteration
-  rateLimitMap.forEach((v, k) => {
-    if (v.resetAt <= now) rateLimitMap.delete(k);
-  });
-}
-
-function isRateLimited(ip: string): boolean {
-  cleanupRateLimitMap();
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return false;
-  }
-
-  if (entry.count >= RATE_LIMIT) return true;
-
-  entry.count++;
-  return false;
-}
-// ────────────────────────────────────────────────────────────────────────────
-
 export async function POST(request: NextRequest) {
   const ip = getClientIP(request);
-  if (isRateLimited(ip)) {
+  if (await isRateLimited(ip)) {
     return NextResponse.json(
       { error: 'Too many requests. Please wait a minute before planning another trip.' },
       { status: 429 }
@@ -53,30 +62,22 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body: PlanTripRequest = await request.json();
-    const { waypoints, settings } = body;
+    const body: PlanTripRequestWithProvider = await request.json();
 
-    // Validation
-    if (!waypoints || waypoints.length < 2) {
-      return NextResponse.json(
-        { error: 'At least 2 waypoints are required' },
-        { status: 400 }
-      );
+    const waypointError = validateWaypoints(body?.waypoints);
+    if (waypointError) {
+      return NextResponse.json({ error: waypointError }, { status: 400 });
     }
 
-    if (!settings) {
-      return NextResponse.json(
-        { error: 'Trip settings are required' },
-        { status: 400 }
-      );
+    const { settings, error: settingsError } = validateAndClampSettings(body?.settings);
+    if (settingsError) {
+      return NextResponse.json({ error: settingsError }, { status: 400 });
     }
 
-    // Determine requested provider (client may pass it to keep UI/server in sync)
-    const requestedProvider = (body as unknown as { provider?: 'google' | 'here' })?.provider;
+    const requestedProvider = body?.provider;
     const envProvider = process.env.MAP_PROVIDER || process.env.NEXT_PUBLIC_MAP_PROVIDER;
     const provider = requestedProvider ?? (envProvider === 'here' ? 'here' : 'google');
 
-    // Validate required API keys for the chosen provider
     if (provider === 'google') {
       const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
       if (!apiKey || apiKey === 'your_google_maps_api_key_here') {
@@ -95,24 +96,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Plan the trip (pass provider so server-side routing matches user's choice)
-    const tripPlan = await planTrip(waypoints, settings, provider);
-
+    const tripPlan = await planTrip(body.waypoints, settings, provider);
     return NextResponse.json(tripPlan);
   } catch (error) {
     console.error('Trip planning error:', error);
 
-    const message =
-      error instanceof Error ? error.message : 'An unexpected error occurred';
-
+    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
     const isRateLimit =
       /rate limit|quota|exceeded|too many requests|over_query_limit|resource_exhausted/i.test(message);
 
     return NextResponse.json(
-      {
-        error: message,
-        code: isRateLimit ? 'RATE_LIMIT_EXCEEDED' : 'PLAN_ERROR',
-      },
+      { error: message, code: isRateLimit ? 'RATE_LIMIT_EXCEEDED' : 'PLAN_ERROR' },
       { status: isRateLimit ? 429 : 500 }
     );
   }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID as nodeRandomUUID } from 'crypto';
+import { getRedisClient } from '@/lib/redisClient';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,21 +25,10 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 6) + Math.random().toString(36).slice(2, 6);
 }
 
-function isKvConfigured(): boolean {
-  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
-}
-
-async function getKv() {
-  const { Redis } = await import('@upstash/redis');
-  return new Redis({
-    url: process.env.KV_REST_API_URL!,
-    token: process.env.KV_REST_API_TOKEN!,
-  });
-}
-
 // POST /api/share — save a trip and return a short ID
 export async function POST(req: NextRequest) {
-  if (!isKvConfigured()) {
+  const kv = await getRedisClient();
+  if (!kv) {
     return NextResponse.json({ error: 'Short-link sharing is not configured (KV_REST_API_URL missing)' }, { status: 503 });
   }
   try {
@@ -49,7 +39,6 @@ export async function POST(req: NextRequest) {
     }
     JSON.parse(body);
     const id = generateId();
-    const kv = await getKv();
     await kv.set(`trip:${id}`, body, { ex: TTL_SECONDS });
     return NextResponse.json({ id }, { status: 201 });
   } catch (err) {
@@ -62,7 +51,8 @@ export async function POST(req: NextRequest) {
 
 // GET /api/share?id=xxxx — retrieve a saved trip
 export async function GET(req: NextRequest) {
-  if (!isKvConfigured()) {
+  const kv = await getRedisClient();
+  if (!kv) {
     return NextResponse.json({ error: 'Short-link sharing is not configured' }, { status: 503 });
   }
   const id = req.nextUrl.searchParams.get('id');
@@ -70,7 +60,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid share ID' }, { status: 400 });
   }
   try {
-    const kv = await getKv();
     const data = await kv.get<string>(`trip:${id}`);
     if (!data) {
       return NextResponse.json({ error: 'Share link not found or expired' }, { status: 404 });
