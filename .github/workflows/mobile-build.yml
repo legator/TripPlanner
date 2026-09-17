@@ -122,5 +122,18 @@ jobs:
           xcodebuild -project ios/App/App.xcodeproj \
             -scheme App \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath DerivedData \
             clean build \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Package iOS Simulator App
+        run: |
+          cd DerivedData/Build/Products/Debug-iphonesimulator
+          zip -r -y ../../../../trip-planner-ios-simulator.zip App.app
+
+      - name: Upload iOS Simulator Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: trip-planner-ios-simulator
+          path: trip-planner-ios-simulator.zip
+          retention-days: 14

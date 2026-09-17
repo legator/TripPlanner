@@ -257,8 +257,21 @@ jobs:
           api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
 
+      - name: Build Unsigned iOS Binaries (.ipa fallback)
+        if: steps.check_ios_secrets.outputs.configured != 'true'
+        run: |
+          mkdir -p build/out/Payload
+          xcodebuild -project ios/App/App.xcodeproj \
+            -scheme App \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath DerivedData \
+            clean build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+          cp -r DerivedData/Build/Products/*-iphoneos/App.app build/out/Payload/
+          cd build/out && zip -r -y App-unsigned.ipa Payload && rm -rf Payload
+
       - name: Upload IPA as Artifact
-        if: steps.check_ios_secrets.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: trip-planner-ios-release-ipa
