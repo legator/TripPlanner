@@ -1,5 +1,8 @@
 name: Mobile Store Release (Google Play & TestFlight)
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -27,6 +30,11 @@ on:
         required: false
         default: ''
         type: string
+      tag_name:
+        description: 'Git tag for GitHub Release (e.g. v1.0.0, optional for manual run)'
+        required: false
+        default: ''
+        type: string
   push:
     tags:
       - 'v*.*.*'
@@ -36,7 +44,7 @@ jobs:
   # Android: Build Signed .aab & Publish to Google Play Internal Testing
   # --------------------------------------------------------------------------
   release-android:
-    name: Release to Google Play
+    name: Release Android (Play Store & APK)
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'android'
     runs-on: ubuntu-latest
 
@@ -50,11 +58,18 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$SERVICE_ACCOUNT_JSON" ]; then
-            echo "::warning::Google Play release skipped: Required secrets (ANDROID_KEYSTORE_BASE64, GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) are not configured."
-            echo "configured=false" >> $GITHUB_OUTPUT
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "has_keystore=true" >> $GITHUB_OUTPUT
           else
-            echo "configured=true" >> $GITHUB_OUTPUT
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not configured. Binaries will remain unsigned."
+            echo "has_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$SERVICE_ACCOUNT_JSON" ]; then
+            echo "has_play_account=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Google Play upload skipped: Required secrets (ANDROID_KEYSTORE_BASE64, GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) are not configured."
+            echo "has_play_account=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up JDK 21
@@ -88,15 +103,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
-      - name: Build Android Release Bundle (.aab)
+      - name: Build Android Release Binaries (.apk & .aab)
         run: |
           cd android
-          ./gradlew bundleRelease --stacktrace
+          ./gradlew assembleRelease bundleRelease --stacktrace
 
-      - name: Sign Android Release Bundle
-        if: steps.check_android_secrets.outputs.configured == 'true'
+      - name: Sign Android Release Bundle (.aab)
+        if: steps.check_android_secrets.outputs.has_keystore == 'true'
         uses: r0adkll/sign-android-release@v1
-        id: sign_app
+        id: sign_bundle
         with:
           releaseDirectory: android/app/build/outputs/bundle/release
           signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -104,21 +119,34 @@ jobs:
           keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
+      - name: Sign Android Release APK (.apk)
+        if: steps.check_android_secrets.outputs.has_keystore == 'true'
+        uses: r0adkll/sign-android-release@v1
+        id: sign_apk
+        with:
+          releaseDirectory: android/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
       - name: Upload to Google Play
-        if: steps.check_android_secrets.outputs.configured == 'true'
+        if: steps.check_android_secrets.outputs.has_play_account == 'true'
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.tripplanner.app
-          releaseFiles: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          releaseFiles: ${{ steps.sign_bundle.outputs.signedReleaseFile || 'android/app/build/outputs/bundle/release/*.aab' }}
           track: ${{ github.event.inputs.track || 'internal' }}
           status: completed
 
-      - name: Upload Release AAB as Artifact
+      - name: Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trip-planner-android-release-bundle
-          path: android/app/build/outputs/bundle/release/*.aab
+          name: trip-planner-android-release
+          path: |
+            android/app/build/outputs/bundle/release/*.aab
+            android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
   # --------------------------------------------------------------------------
@@ -236,3 +264,105 @@ jobs:
           name: trip-planner-ios-release-ipa
           path: build/out/*.ipa
           retention-days: 30
+
+  # --------------------------------------------------------------------------
+  # GitHub: Publish Release Assets (.apk, .aab, .ipa) to GitHub Releases
+  # --------------------------------------------------------------------------
+  publish-github-release:
+    name: Publish to GitHub Releases
+    needs: [release-android, release-ios]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.release-android.result == 'success' || needs.release-ios.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create release assets directory
+        run: mkdir -p release-assets dist
+
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: trip-planner-android-release
+          path: release-assets/android
+
+      - name: Download iOS artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: trip-planner-ios-release-ipa
+          path: release-assets/ios
+
+      - name: Prepare release files
+        id: prepare_files
+        run: |
+          echo "Inspecting downloaded assets:"
+          find release-assets -type f || true
+
+          # Android APK: prefer signed APK if available, otherwise take unsigned/debug
+          APK_FILE=$(find release-assets/android -name "*signed*.apk" 2>/dev/null | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            APK_FILE=$(find release-assets/android -name "*.apk" 2>/dev/null | head -n 1)
+          fi
+          if [ -n "$APK_FILE" ]; then
+            cp "$APK_FILE" dist/TripPlanner.apk
+            echo "Staged APK: $APK_FILE -> dist/TripPlanner.apk"
+          fi
+
+          # Android AAB: prefer signed AAB if available, otherwise unsigned
+          AAB_FILE=$(find release-assets/android -name "*signed*.aab" 2>/dev/null | head -n 1)
+          if [ -z "$AAB_FILE" ]; then
+            AAB_FILE=$(find release-assets/android -name "*.aab" 2>/dev/null | head -n 1)
+          fi
+          if [ -n "$AAB_FILE" ]; then
+            cp "$AAB_FILE" dist/TripPlanner.aab
+            echo "Staged AAB: $AAB_FILE -> dist/TripPlanner.aab"
+          fi
+
+          # iOS IPA
+          IPA_FILE=$(find release-assets/ios -name "*.ipa" 2>/dev/null | head -n 1)
+          if [ -n "$IPA_FILE" ]; then
+            cp "$IPA_FILE" dist/TripPlanner.ipa
+            echo "Staged IPA: $IPA_FILE -> dist/TripPlanner.ipa"
+          fi
+
+          echo "Staged release files in dist:"
+          ls -la dist/
+
+          FILE_COUNT=$(find dist -type f | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "::warning::No release binaries (.apk, .aab, .ipa) found to attach to release."
+            echo "has_files=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_files=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine Release Tag
+        id: get_tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="release-$(date +'%Y%m%d-%H%M%S')"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Target Release Tag: $TAG"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: steps.prepare_files.outputs.has_files == 'true'
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          name: "TripPlanner ${{ steps.get_tag.outputs.tag }}"
+          files: dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
