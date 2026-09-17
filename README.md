@@ -48,8 +48,39 @@ A modern, full-featured road-trip itinerary planner and live in-car driving comp
 - **Dual-Mode Mobile Layout**: Seamless thumb-friendly switching between Itinerary (`[📋 Itinerary]`) and Full-Screen Map (`[🗺️ Map]` / `[🚗 Drive]`).
 - **Safe-Area Inset Support**: Full layout awareness (`safe-pt`, `safe-pb`) for phone notches, dynamic islands, and system gesture bars.
 - **Adaptive HUD Constraints**: Responsive layouts specifically tuned for phones in both portrait and landscape car mounts.
+- **Voice Navigation Prompts**: Spoken arrival and turn guidance via the native Web Speech API with persistent mute toggling.
+- **Automatic Off-Route Rerouting**: Continuously monitors vehicle deviation against the planned route polyline (> 200m) and recalculates the remaining itinerary automatically.
+- **Dynamic Traffic ETAs**: Route-provider live traffic duration and delay indicators (`+Xm delay`) dynamically polled from `/api/route/eta`.
+- **Corridor-Matched Incidents**: Matches HERE Traffic incidents along the actual route corridor rather than just a circular radius.
+- **Progress Persistence**: Saves active driving progress and targeted stops to `localStorage`, allowing the app to close and reopen seamlessly without losing state.
+- **PWA & Offline Tile Caching**: Service worker caches map tiles (Google, HERE, OSM) and routing responses for reliable connectivity in rural dead zones.
 
-### 7. 📅 Smart Trip Planning & Editing
+### 7. ⚡ Electric Vehicle (EV) Planning & Charging
+- **Battery Pack & Consumption Modeling**: Configure battery capacity (kWh), current charge %, average consumption (Wh/km), and maximum DC fast charging speed (kW).
+- **Vehicle Model Presets**: Built-in presets for Tesla Model 3/Y, Volkswagen ID.4, Hyundai Ioniq 5, and custom EV setups.
+- **Smart Stop Selection**: Automatically detects when battery levels drop near the minimum buffer and inserts optimal high-power charging stops along the route corridor.
+- **Tapered Charging Curve Estimation**: Simulates realistic DC fast-charging duration curves (fast up to 80%, tapering past 80%) and incorporates charging stops directly into the daily schedule.
+- **Live Charger Availability & Pricing**: Displays charging networks (IONITY, Tesla Supercharger, Fastned, EnBW, Allego), connector types (CCS2, Type 2, NACS, CHAdeMO), available/total stalls, and cost per kWh.
+
+### 8. 💰 Complete Trip Ledger & Expense Management
+- **Comprehensive Expense Tracking**: Log expenses across 8 dedicated categories: Fuel, EV Charging, Tolls & Vignettes, Lodging & Hotels, Food & Dining, Attractions & Tours, Parking, and Miscellaneous.
+- **Multi-Currency Engine**: Support for 9 currencies (EUR, USD, GBP, CAD, AUD, JPY, CHF, PLN, UAH) with automatic reference conversion to your chosen base currency.
+- **Cost Splitting & Debt Settlement**: Split expenses among individual or all travelers, with an automated debt minimization algorithm ("who owes whom").
+- **Plan Pre-Population**: 1-click import of planned fuel, EV charging, hotels, and restaurant estimates directly into the ledger.
+- **CSV Export**: Export full trip expense ledgers with date, category, original and converted currency amounts, payer, and split breakdown.
+
+### 9. 🌦️ Weather & Safety Intelligence (Open-Meteo)
+- **100% Open-Meteo Integration**: Free, worldwide, high-precision forecasts requiring 0 API keys.
+- **Severe Weather Hazard Warnings**: Proactively flags dangerous conditions along the itinerary:
+  - 💨 **High Wind & Gale Alerts** (gusts > 55–75 km/h)
+  - ❄️ **Snow & Ice Hazards** (snowfall accumulation & freezing roads)
+  - 🌊 **Flash Flooding & Torrential Rain** (heavy rain > 25–40 mm, hydroplaning risk)
+  - 🔥 **Extreme Heat (> 38°C) & Wildfire/Smoke Risks**
+  - 🧊 **Sub-Zero Freeze Warnings (< -15°C)**
+- **Smart Departure Recommendations**: Analyzes hourly front progressions to recommend delaying or advancing departure times when morning or afternoon road conditions are hazardous.
+- **Leg & Attraction Forecasts**: Dedicated forecast badges and hazard warnings for both intermediate tourist attractions and overnight destinations.
+
+### 10. 📅 Smart Trip Planning & Editing
 - **Intelligent Day Splitting**: Groups driving legs into realistic daily segments based on user-configured driving time and distance limits.
 - **Interactive Itinerary Customization**:
   - Insert rest days (no driving)
@@ -57,10 +88,9 @@ A modern, full-featured road-trip itinerary planner and live in-car driving comp
   - Insert custom overnight stays
   - Re-optimize route order
 - **Scheduled Itinerary**: Detailed daily timelines with check-out, driving legs, meal stops, sightseeing time, and hotel check-in.
-- **Weather Forecasts**: Integrated multi-day forecasts along each stop via **Open-Meteo**.
 - **Fuel & Budget Estimator**: Calculates estimated fuel costs based on vehicle efficiency (L/100 km) and regional fuel prices.
 
-### 8. 💾 Storage, Export & Sharing
+### 11. 💾 Storage, Export & Sharing
 - **Offline & Local Storage**: Automatically saves waypoints, settings, and itinerary state to `localStorage`.
 - **Export Options**:
   - **GPX** (for dedicated GPS units and handheld devices)
@@ -152,6 +182,37 @@ A modern, full-featured road-trip itinerary planner and live in-car driving comp
    - Tap **"Driving Mode"** or the car icon (`🚗`).
    - The HUD will automatically lock onto your live GPS location, match your active day, target the next upcoming waypoint, and keep your screen awake while driving.
 7. **Export or Share**: Download GPX/KML/CSV/iCal files or generate a shareable link.
+
+---
+
+## 📱 Mobile App (Android & iOS)
+
+TripPlanner uses **Capacitor** to build native mobile apps for **Android** and **iOS** from the same codebase, featuring native GPS tracking, screen stay-awake, and haptic feedback.
+
+### Android Development
+1. Ensure **Android Studio** is installed.
+2. Open the project in Android Studio:
+   ```bash
+   npm run cap:android
+   ```
+3. In Android Studio:
+   - Connect your Android device via USB (with USB Debugging enabled) or start an Android Virtual Device (AVD).
+   - Click **Run (▶)** to install and launch the debug app.
+   - To build an APK for testing or Google Play release: **Build** → **Build Bundle(s) / APK(s)** → **Build APK(s)**.
+
+### iOS Development (macOS)
+1. Ensure **Xcode** and CocoaPods are installed on macOS.
+2. Open the project in Xcode:
+   ```bash
+   npm run cap:ios
+   ```
+3. In Xcode, select your simulator or plugged-in iPhone and click **Run (▶)**.
+
+### Syncing Native Projects
+Whenever you update plugins, Capacitor configuration, or web assets:
+```bash
+npm run cap:sync
+```
 
 ---
 

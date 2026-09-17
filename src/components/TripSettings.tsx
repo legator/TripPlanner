@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 
-import { TripSettings } from '@/lib/types';
+import { TripSettings, EVProfile, EVConnectorType } from '@/lib/types';
+import { EV_PRESETS, DEFAULT_EV_PROFILE, calculateEVRangeKm } from '@/lib/evPlanner';
 import { MapProviderChoice } from './MapProviderPicker';
 
 interface TripSettingsProps {
@@ -38,9 +39,17 @@ export default function TripSettingsPanel({
   startLocationName,
 }: TripSettingsProps) {
   const [isFetchingFuel, setIsFetchingFuel] = useState(false);
+  const evProfile: EVProfile = settings.evProfile ?? DEFAULT_EV_PROFILE;
+
   const update = (partial: Partial<TripSettings>) => {
     onChange({ ...settings, ...partial });
   };
+
+  const updateEV = (partial: Partial<EVProfile>) => {
+    update({ evProfile: { ...evProfile, ...partial } });
+  };
+
+  const { singleChargeRangeKm } = calculateEVRangeKm(evProfile);
 
   const handleAutoFillFuel = async () => {
     setIsFetchingFuel(true);
@@ -436,6 +445,224 @@ export default function TripSettingsPanel({
             }`}
           />
         </button>
+      </div>
+
+      {/* Electric Vehicle (EV) Mode */}
+      <div className="border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl p-3.5 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚡</span>
+            <div>
+              <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-300 uppercase tracking-wide">
+                Electric Vehicle (EV) Mode
+              </h4>
+              <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                Auto-plan charging stops, consumption & battery levels
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={evProfile.enabled}
+            onClick={() => updateEV({ enabled: !evProfile.enabled })}
+            disabled={disabled}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 ${
+              evProfile.enabled ? 'bg-emerald-600' : 'bg-gray-300 dark:bg-gray-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                evProfile.enabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        {evProfile.enabled && (
+          <div className="pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40 space-y-3">
+            {/* Vehicle Preset */}
+            <div>
+              <label className="block text-[11px] font-semibold text-emerald-900 dark:text-emerald-200 mb-1">
+                Vehicle Model Preset
+              </label>
+              <select
+                onChange={(e) => {
+                  const preset = EV_PRESETS.find((p) => p.id === e.target.value);
+                  if (preset) {
+                    updateEV({
+                      batteryCapacityKWh: preset.batteryCapacityKWh,
+                      consumptionWhPerKm: preset.consumptionWhPerKm,
+                      maxChargingPowerKW: preset.maxChargingPowerKW,
+                      preferredConnectorTypes: preset.preferredConnectors,
+                    });
+                  }
+                }}
+                disabled={disabled}
+                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-emerald-300 dark:border-emerald-700 rounded-lg text-gray-800 dark:text-gray-100"
+              >
+                {EV_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.batteryCapacityKWh} kWh)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Range pill */}
+            <div className="flex items-center justify-between bg-emerald-100/70 dark:bg-emerald-900/40 px-3 py-1.5 rounded-lg text-xs text-emerald-800 dark:text-emerald-200 font-medium">
+              <span>Estimated Safe Range:</span>
+              <span className="font-bold text-emerald-950 dark:text-emerald-100">~{singleChargeRangeKm} km</span>
+            </div>
+
+            {/* Battery Specs Grid */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-0.5">
+                  Battery Pack (kWh)
+                </label>
+                <input
+                  type="number"
+                  value={evProfile.batteryCapacityKWh}
+                  onChange={(e) => updateEV({ batteryCapacityKWh: Number(e.target.value) })}
+                  min={20}
+                  max={200}
+                  step={1}
+                  disabled={disabled}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-0.5">
+                  Current Charge (%)
+                </label>
+                <input
+                  type="number"
+                  value={evProfile.currentChargePercent}
+                  onChange={(e) => updateEV({ currentChargePercent: Number(e.target.value) })}
+                  min={10}
+                  max={100}
+                  step={5}
+                  disabled={disabled}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-0.5">
+                  Consumption (Wh/km)
+                </label>
+                <input
+                  type="number"
+                  value={evProfile.consumptionWhPerKm}
+                  onChange={(e) => updateEV({ consumptionWhPerKm: Number(e.target.value) })}
+                  min={100}
+                  max={350}
+                  step={5}
+                  disabled={disabled}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-0.5">
+                  Max Charge Power (kW)
+                </label>
+                <input
+                  type="number"
+                  value={evProfile.maxChargingPowerKW}
+                  onChange={(e) => updateEV({ maxChargingPowerKW: Number(e.target.value) })}
+                  min={20}
+                  max={350}
+                  step={10}
+                  disabled={disabled}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-0.5">
+                  Target Charge (%)
+                </label>
+                <input
+                  type="number"
+                  value={evProfile.targetChargePercent}
+                  onChange={(e) => updateEV({ targetChargePercent: Number(e.target.value) })}
+                  min={50}
+                  max={100}
+                  step={5}
+                  disabled={disabled}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-0.5">
+                  Min Buffer SoC (%)
+                </label>
+                <input
+                  type="number"
+                  value={evProfile.minArrivalChargePercent}
+                  onChange={(e) => updateEV({ minArrivalChargePercent: Number(e.target.value) })}
+                  min={5}
+                  max={30}
+                  step={5}
+                  disabled={disabled}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {/* Connectors & kWh Price */}
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-1">
+                Preferred Connector Types
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {(['CCS2', 'Type2', 'Tesla_Supercharger', 'Tesla_NACS', 'CHAdeMO'] as EVConnectorType[]).map((conn) => {
+                  const isSelected = (evProfile.preferredConnectorTypes || []).includes(conn);
+                  return (
+                    <button
+                      key={conn}
+                      type="button"
+                      onClick={() => {
+                        const current = evProfile.preferredConnectorTypes || [];
+                        const next = isSelected
+                          ? current.filter((c) => c !== conn)
+                          : [...current, conn];
+                        updateEV({ preferredConnectorTypes: next });
+                      }}
+                      className={`text-[10px] px-2 py-0.5 rounded font-medium border transition-colors ${
+                        isSelected
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600'
+                      }`}
+                    >
+                      {conn.replace('_', ' ')}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-0.5">
+                Fast Charging Price (€/kWh)
+              </label>
+              <input
+                type="number"
+                value={evProfile.kwhPrice ?? 0.45}
+                onChange={(e) => updateEV({ kwhPrice: Number(e.target.value) })}
+                min={0.1}
+                max={2.0}
+                step={0.05}
+                disabled={disabled}
+                className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

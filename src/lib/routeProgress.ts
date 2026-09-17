@@ -345,3 +345,42 @@ export function findActiveTripDayAndTarget(
     ...res,
   };
 }
+
+export interface DeviationCheckResult {
+  isDeviated: boolean;
+  distanceOffRouteMeters: number;
+  closestPoint: LatLng | null;
+  closestPathIndex: number;
+}
+
+/**
+ * Checks if the driver has deviated significantly from the day's planned polyline.
+ * @param currentPos Current vehicle coordinates
+ * @param day The active DayPlan
+ * @param thresholdMeters Deviation threshold in meters (default 200m)
+ */
+export function checkRouteDeviation(
+  currentPos: LatLng | null,
+  day: DayPlan,
+  thresholdMeters = 200
+): DeviationCheckResult {
+  if (!currentPos) {
+    return { isDeviated: false, distanceOffRouteMeters: 0, closestPoint: null, closestPathIndex: 0 };
+  }
+
+  const path = decodeDayPolyline(day);
+  if (path.length === 0) {
+    return { isDeviated: false, distanceOffRouteMeters: 0, closestPoint: null, closestPathIndex: 0 };
+  }
+
+  const { index, distanceKm } = findClosestPointOnPath(currentPos, path);
+  const distanceMeters = Math.round(distanceKm * 1000);
+
+  return {
+    isDeviated: distanceMeters > thresholdMeters,
+    distanceOffRouteMeters: distanceMeters,
+    closestPoint: path[index],
+    closestPathIndex: index,
+  };
+}
+

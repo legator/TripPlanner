@@ -103,7 +103,16 @@ function chunkPointsByDistance(
   return chunks;
 }
 
-export async function GET(request: NextRequest) {
+interface TrafficQuery {
+  corridor?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  radius?: number | null;
+  bbox?: string | null;
+  limit?: number | null;
+}
+
+async function processTrafficIncidents(query: TrafficQuery) {
   if (!HERE_API_KEY) {
     return NextResponse.json(
       { error: 'HERE API key is not configured' },
@@ -111,14 +120,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { searchParams } = new URL(request.url);
-  const corridor = searchParams.get('corridor');
-  const latStr = searchParams.get('lat');
-  const lngStr = searchParams.get('lng');
-  const radiusStr = searchParams.get('radius');
-  const bbox = searchParams.get('bbox');
-  const limitStr = searchParams.get('limit');
-  const limit = limitStr ? Math.min(Math.max(1, parseInt(limitStr, 10)), 150) : 50;
+  const { corridor, lat, lng, radius, bbox } = query;
+  const limit = query.limit ? Math.min(Math.max(1, query.limit), 150) : 50;
 
   const inFilters: string[] = [];
 
@@ -132,8 +135,7 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const radius = radiusStr ? parseInt(radiusStr, 10) : 150;
-      const safeRadius = Math.min(Math.max(radius, 50), 5000);
+      const safeRadius = Math.min(Math.max(radius || 150, 50), 5000);
       const totalDist = getPolylineDistance(points);
 
       // HERE Traffic API v7 restricts corridor length to 500km max.
@@ -163,17 +165,9 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-  } else if (latStr && lngStr) {
-    const lat = parseFloat(latStr);
-    const lng = parseFloat(lngStr);
-    if (isNaN(lat) || isNaN(lng)) {
-      return NextResponse.json(
-        { error: 'Invalid lat or lng coordinate' },
-        { status: 400 }
-      );
-    }
-    const radius = radiusStr ? parseInt(radiusStr, 10) : 15000;
-    inFilters.push(`circle:${lat.toFixed(5)},${lng.toFixed(5)};r=${Math.min(Math.max(radius, 500), 50000)}`);
+  } else if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+    const safeRadius = Math.min(Math.max(radius || 15000, 500), 50000);
+    inFilters.push(`circle:${lat.toFixed(5)},${lng.toFixed(5)};r=${safeRadius}`);
   } else if (bbox) {
     inFilters.push(`boundingbox:${bbox}`);
   } else {
@@ -265,5 +259,40 @@ export async function GET(request: NextRequest) {
       { incidents: [], total: 0, error: 'Failed to fetch traffic incidents' },
       { status: 500 }
     );
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const corridor = searchParams.get('corridor');
+  const latStr = searchParams.get('lat');
+  const lngStr = searchParams.get('lng');
+  const radiusStr = searchParams.get('radius');
+  const bbox = searchParams.get('bbox');
+  const limitStr = searchParams.get('limit');
+
+  return processTrafficIncidents({
+    corridor,
+    lat: latStr ? parseFloat(latStr) : null,
+    lng: lngStr ? parseFloat(lngStr) : null,
+    radius: radiusStr ? parseInt(radiusStr, 10) : null,
+    bbox,
+    limit: limitStr ? parseInt(limitStr, 10) : null,
+  });
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    return processTrafficIncidents({
+      corridor: body.corridor,
+      lat: body.lat != null ? Number(body.lat) : null,
+      lng: body.lng != null ? Number(body.lng) : null,
+      radius: body.radius != null ? Number(body.radius) : null,
+      bbox: body.bbox,
+      limit: body.limit != null ? Number(body.limit) : null,
+    });
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON request body' }, { status: 400 });
   }
 }

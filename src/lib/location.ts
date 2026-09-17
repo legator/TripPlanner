@@ -1,4 +1,7 @@
+import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
 import { Waypoint } from './types';
+import { generateUUID } from './uuid';
 
 export class GeolocationError extends Error {
   code?: number;
@@ -20,7 +23,8 @@ export interface LiveDrivingPosition {
 }
 
 /**
- * Prompts user for browser geolocation permission and returns their coordinates.
+ * Prompts user for geolocation permission and returns their coordinates.
+ * Supports both native mobile (Capacitor) and desktop/mobile web browsers.
  */
 export async function getCurrentCoordinates(
   options: PositionOptions = {
@@ -29,6 +33,33 @@ export async function getCurrentCoordinates(
     maximumAge: 30000,
   }
 ): Promise<{ lat: number; lng: number; accuracy?: number }> {
+  // If running natively inside Android or iOS
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const perm = await Geolocation.checkPermissions();
+      if (perm.location !== 'granted') {
+        const req = await Geolocation.requestPermissions();
+        if (req.location !== 'granted') {
+          throw new GeolocationError('Location permission was denied in app settings.');
+        }
+      }
+      const pos = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: options.enableHighAccuracy,
+        timeout: options.timeout,
+        maximumAge: options.maximumAge,
+      });
+      return {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to get native GPS location.';
+      throw new GeolocationError(msg);
+    }
+  }
+
+  // Browser navigator.geolocation fallback
   if (typeof window === 'undefined' || !navigator.geolocation) {
     throw new GeolocationError('Geolocation is not supported by your browser.');
   }
@@ -64,6 +95,7 @@ export async function getCurrentCoordinates(
 
 /**
  * Continuously watches device GPS position for real-time driving navigation.
+ * Uses native mobile GPS when in Capacitor app, with browser fallback.
  * Returns an unsubscribe callback.
  */
 export function watchCurrentPosition(
@@ -75,12 +107,66 @@ export function watchCurrentPosition(
     maximumAge: 1000,
   }
 ): () => void {
+  // If running natively on Android or iOS
+  if (Capacitor.isNativePlatform()) {
+    let watchId: string | null = null;
+    let isCancelled = false;
+
+    Geolocation.requestPermissions().then((perm) => {
+      if (isCancelled) return;
+      if (perm.location !== 'granted') {
+        onError?.(new GeolocationError('Location permission denied in app settings.'));
+        return;
+      }
+      Geolocation.watchPosition(
+        {
+          enableHighAccuracy: options.enableHighAccuracy,
+          timeout: options.timeout,
+          maximumAge: options.maximumAge,
+        },
+        (position, err) => {
+          if (err) {
+            onError?.(new GeolocationError(err.message || 'Native location tracking error.'));
+            return;
+          }
+          if (position) {
+            onUpdate({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+              heading: position.coords.heading ?? null,
+              speed: position.coords.speed ?? null,
+              altitude: position.coords.altitude ?? null,
+              timestamp: position.timestamp,
+            });
+          }
+        }
+      ).then((id) => {
+        if (isCancelled) {
+          Geolocation.clearWatch({ id });
+        } else {
+          watchId = id;
+        }
+      }).catch((err) => {
+        onError?.(new GeolocationError(err?.message || 'Failed to start native GPS tracking.'));
+      });
+    });
+
+    return () => {
+      isCancelled = true;
+      if (watchId) {
+        Geolocation.clearWatch({ id: watchId });
+      }
+    };
+  }
+
+  // Browser navigator.geolocation fallback
   if (typeof window === 'undefined' || !navigator.geolocation) {
     onError?.(new GeolocationError('Geolocation is not supported by your browser.'));
     return () => {};
   }
 
-  const watchId = navigator.geolocation.watchPosition(
+  const browserWatchId = navigator.geolocation.watchPosition(
     (position) => {
       onUpdate({
         lat: position.coords.latitude,
@@ -111,7 +197,7 @@ export function watchCurrentPosition(
   );
 
   return () => {
-    navigator.geolocation.clearWatch(watchId);
+    navigator.geolocation.clearWatch(browserWatchId);
   };
 }
 
@@ -179,7 +265,7 @@ export async function getCurrentLocationWaypoint(
     : prefix;
 
   return {
-    id: crypto.randomUUID(),
+    id: generateUUID(),
     name: displayName,
     address: geocoded.address || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`,
     location: {

@@ -6,6 +6,7 @@ import { DAY_COLORS } from '@/lib/constants';
 import PlaceCard from './PlaceCard';
 import PlaceSearch from './PlaceSearch';
 import WeatherBadge from './WeatherBadge';
+import { DayWeather } from '@/lib/weather';
 
 interface DayCardProps {
   day: DayPlan;
@@ -42,6 +43,7 @@ export default function DayCard({
 }: DayCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showEndStopPicker, setShowEndStopPicker] = useState(false);
+  const [dayWeather, setDayWeather] = useState<DayWeather | null>(null);
   const color = day.isRestDay ? '#6b7280' : DAY_COLORS[dayIndex % DAY_COLORS.length];
 
   const formatDuration = (minutes: number) => {
@@ -109,6 +111,7 @@ export default function DayCard({
               lat={day.endLocation.location.lat}
               lng={day.endLocation.location.lng}
               date={day.date}
+              onWeatherLoaded={setDayWeather}
             />
           </div>
         </div>
@@ -139,6 +142,37 @@ export default function DayCard({
         </div>
       )}
 
+      {/* Weather Safety Hazard & Departure Recommendation */}
+      {dayWeather && (dayWeather.alerts.length > 0 || dayWeather.departureAdvice) && (
+        <div className="mx-3 mb-2 space-y-1.5">
+          {dayWeather.alerts.map((alert) => (
+            <div
+              key={alert.id}
+              className={`px-3 py-2 rounded-lg text-xs flex items-start gap-2 border ${
+                alert.severity === 'critical'
+                  ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border-rose-200 dark:border-rose-800/60'
+                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-800/60'
+              }`}
+            >
+              <span className="text-base leading-none">{alert.icon}</span>
+              <div className="flex-1 min-w-0">
+                <span className="font-bold">{alert.title}: </span>
+                <span>{alert.message}</span>
+              </div>
+            </div>
+          ))}
+
+          {dayWeather.departureAdvice && (
+            <div className="px-3 py-2 rounded-lg text-xs bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800/60 flex items-start gap-2">
+              <span className="text-base leading-none">⏱️</span>
+              <div className="flex-1 min-w-0 font-medium">
+                {dayWeather.departureAdvice}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Summary stats */}
       <div className="flex items-center gap-3 px-3 pb-2 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
         {day.schedule.length > 0 && (
@@ -149,11 +183,21 @@ export default function DayCard({
         {day.gasStops.length > 0 && (
           <span className="flex items-center gap-1">⛽ {day.gasStops.length}</span>
         )}
+        {(day.evStopsDetailed?.length ?? 0) > 0 && (
+          <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+            ⚡ {day.evStopsDetailed?.length} charge {day.estimatedChargingCost ? `(€${day.estimatedChargingCost.toFixed(2)})` : ''}
+          </span>
+        )}
         {day.hotelSuggestions.length > 0 && (
           <span className="flex items-center gap-1">🏨 {day.hotelSuggestions.length}</span>
         )}
         {day.attractions.length > 0 && (
           <span className="flex items-center gap-1">⭐ {day.attractions.length}</span>
+        )}
+        {day.parkingStops && day.parkingStops.length > 0 && (
+          <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium">
+            🅿️ {day.parkingStops.length}
+          </span>
         )}
         <button
           onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
@@ -362,16 +406,85 @@ export default function DayCard({
           )}
 
           {/* EV Charging */}
-          {day.evChargingStops?.length > 0 && (
+          {((day.evStopsDetailed && day.evStopsDetailed.length > 0) || (day.evChargingStops && day.evChargingStops.length > 0)) && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
-                EV Charging
-              </h4>
-              <div className="space-y-0.5">
-                {day.evChargingStops.map((ev) => (
-                  <PlaceCard key={ev.id} place={ev} icon="⚡" compact />
-                ))}
+              <div className="flex items-center justify-between mb-1.5">
+                <h4 className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <span>⚡</span> EV Fast Charging
+                </h4>
+                {day.estimatedChargingCost && day.estimatedChargingCost > 0 ? (
+                  <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                    Est. €{day.estimatedChargingCost.toFixed(2)}
+                  </span>
+                ) : null}
               </div>
+
+              {day.evStopsDetailed && day.evStopsDetailed.length > 0 ? (
+                <div className="space-y-2">
+                  {day.evStopsDetailed.map((evStop, idx) => (
+                    <div
+                      key={evStop.place.id || `ev-stop-${idx}`}
+                      className="p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-1.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-900 dark:text-white">
+                            {evStop.place.name}
+                          </p>
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                            {evStop.place.address || evStop.place.vicinity}
+                          </p>
+                        </div>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          evStop.isAvailable !== false
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200'
+                        }`}>
+                          {evStop.isAvailable !== false ? '● Available' : '● Busy'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5 text-center text-[10px] bg-white dark:bg-gray-800/80 p-1.5 rounded border border-emerald-100 dark:border-emerald-900/40">
+                        <div>
+                          <p className="text-gray-400 font-medium">Battery</p>
+                          <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                            {evStop.arrivalBatteryPercent}% ➔ {evStop.departureBatteryPercent}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">Duration</p>
+                          <p className="font-bold text-gray-800 dark:text-gray-200">
+                            ~{evStop.chargingMinutes} min
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">Energy / Cost</p>
+                          <p className="font-bold text-gray-800 dark:text-gray-200">
+                            +{evStop.energyNeededKWh} kWh {evStop.chargingCost ? `(€${evStop.chargingCost})` : ''}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400 pt-0.5">
+                        <span className="font-medium">
+                          ⚡ {evStop.chargerPowerKW ? `${evStop.chargerPowerKW} kW` : '150 kW'} • {evStop.connectorType || 'CCS2'}
+                        </span>
+                        {evStop.place.evDetails?.availableStalls !== undefined && (
+                          <span>
+                            {evStop.place.evDetails.availableStalls}/{evStop.place.evDetails.totalStalls} stalls free
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {day.evChargingStops.map((ev) => (
+                    <PlaceCard key={ev.id} place={ev} icon="⚡" compact />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -403,15 +516,25 @@ export default function DayCard({
             </div>
           )}
 
-          {/* Attractions */}
+          {/* Attractions & Per-Attraction Weather */}
           {day.attractions.length > 0 && (
             <div>
               <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
-                Nearby Attractions
+                Nearby Attractions & Forecast
               </h4>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {day.attractions.slice(0, 4).map((attr) => (
-                  <PlaceCard key={attr.id} place={attr} icon="⭐" />
+                  <div key={attr.id} className="space-y-1">
+                    <PlaceCard place={attr} icon="⭐" />
+                    <div className="pl-2">
+                      <WeatherBadge
+                        lat={attr.location.lat}
+                        lng={attr.location.lng}
+                        date={day.date}
+                        compact
+                      />
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -430,8 +553,71 @@ export default function DayCard({
               </div>
             </div>
           )}
+
+          {/* Highway & Toll Rest Stops / Parking */}
+          {day.parkingStops && day.parkingStops.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <h4 className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <span>🅿️</span> Highway Rest Stops & Parking
+                </h4>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                  {day.parkingStops.length} along route
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {day.parkingStops.map((parking) => (
+                  <div
+                    key={parking.id}
+                    className="p-2.5 rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/30 dark:bg-blue-950/20 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                          {parking.name}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 font-medium">
+                          {parking.parkingDetails?.isHighwayRestStop ? '🛑 Rest Area' : '🅿️ Parking'}
+                        </span>
+                        {parking.isOpen !== undefined && (
+                          <span
+                            className={`text-[9px] px-1 rounded ${
+                              parking.isOpen
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                                : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                            }`}
+                          >
+                            {parking.isOpen ? 'Open' : 'Closed'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                        {parking.address || parking.vicinity}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onAddOvernightStop(dayIndex, {
+                          id: parking.id,
+                          name: `🅿️ ${parking.name}`,
+                          address: parking.address || parking.vicinity || 'Parking',
+                          location: parking.location,
+                        })
+                      }
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-[11px] font-semibold transition-all flex-shrink-0"
+                      title="Add this parking / rest area as a planned stop on this day"
+                    >
+                      + Add Stop
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+

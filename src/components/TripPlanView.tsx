@@ -16,6 +16,7 @@ interface TripPlanViewProps {
   onOpenUpdateTripModal?: () => void;
   onStartDayFromLocation?: (dayIndex: number) => void;
   onStartDriving?: (dayIndex?: number) => void;
+  onOpenCityParking?: () => void;
   isPlanning: boolean;
   maxDistanceKm: number;
   maxDrivingMinutes: number;
@@ -33,6 +34,7 @@ export default function TripPlanView({
   onOpenUpdateTripModal,
   onStartDayFromLocation,
   onStartDriving,
+  onOpenCityParking,
   isPlanning,
   maxDistanceKm,
   maxDrivingMinutes,
@@ -111,17 +113,29 @@ export default function TripPlanView({
       </div>
 
       {/* Live Action Buttons */}
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-1.5">
         {onOpenUpdateTripModal && (
           <button
             type="button"
             onClick={onOpenUpdateTripModal}
             disabled={isPlanning}
-            className="py-2.5 px-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 border border-blue-200 dark:border-blue-800 transition-all truncate"
+            className="py-2.5 px-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 font-semibold rounded-xl text-[11px] flex items-center justify-center gap-1 border border-blue-200 dark:border-blue-800 transition-all truncate"
             title="Recalculate route from current GPS location"
           >
             <span>🧭</span>
-            <span className="truncate">Update from GPS</span>
+            <span className="truncate">GPS Update</span>
+          </button>
+        )}
+        {onOpenCityParking && (
+          <button
+            type="button"
+            onClick={onOpenCityParking}
+            disabled={isPlanning}
+            className="py-2.5 px-2 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 font-semibold rounded-xl text-[11px] flex items-center justify-center gap-1 border border-indigo-200 dark:border-indigo-800 transition-all truncate"
+            title="Search parking facilities in destination city or near any stop"
+          >
+            <span>🅿️</span>
+            <span className="truncate">Find Parking</span>
           </button>
         )}
         {onStartDriving && (
@@ -129,11 +143,11 @@ export default function TripPlanView({
             type="button"
             onClick={() => onStartDriving(selectedDay !== null ? selectedDay : undefined)}
             disabled={isPlanning}
-            className="py-2.5 px-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all transform active:scale-[0.99] truncate"
+            className="py-2.5 px-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl text-[11px] flex items-center justify-center gap-1 shadow-sm transition-all transform active:scale-[0.99] truncate"
             title="Launch live in-app driving follow mode with HUD"
           >
             <span>🚗</span>
-            <span className="truncate">Driving Mode</span>
+            <span className="truncate">Drive Mode</span>
           </button>
         )}
       </div>

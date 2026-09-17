@@ -77,6 +77,16 @@ async function callDirectionsAPI(
   const data = await response.json();
 
   if (data.status !== 'OK') {
+    if (data.status === 'OVER_QUERY_LIMIT' || data.status === 'RESOURCE_EXHAUSTED' || response.status === 429) {
+      throw new Error(
+        'Google Maps API quota exceeded (OVER_QUERY_LIMIT). Rate limit reached. Switch to HERE Maps provider to continue planning.'
+      );
+    }
+    if (data.status === 'REQUEST_DENIED') {
+      throw new Error(
+        `Google Directions request denied: ${data.error_message || 'API key invalid or billing disabled'}. You can switch to HERE Maps in settings.`
+      );
+    }
     if (data.status === 'ZERO_RESULTS') {
       throw new Error(
         'No driving route found between the selected places. Make sure all locations are reachable by car.'
@@ -152,6 +162,7 @@ export const googleProvider: RoutingProvider = {
       cafe: ['cafe', 'coffee_shop'],
       rest_stop: ['rest_stop', 'park', 'tourist_attraction'],
       lodging: ['hotel', 'motel', 'lodging'],
+      parking: ['parking'],
     };
     const body = {
       includedTypes: typeMap[type] || [type],

@@ -19,6 +19,7 @@ export interface RouteLeg {
   startLocation: { lat: number; lng: number };
   endLocation: { lat: number; lng: number };
   steps: RouteStep[];
+  tollCost?: number;
 }
 
 export interface RouteResult {

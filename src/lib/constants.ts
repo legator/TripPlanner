@@ -27,6 +27,8 @@ export const SEARCH_RADIUS = {
   RESTAURANT: 10000,   // 10 km
   EV_CHARGING: 10000,  // 10 km
   CAMPGROUND: 20000,   // 20 km
+  PARKING: 5000,       // 5 km for city parking
+  HIGHWAY_REST_STOP: 10000, // 10 km along highway corridors
 };
 
 export const MAP_DEFAULT_CENTER = { lat: 48.5, lng: 15.0 }; // center of Europe
@@ -54,4 +56,6 @@ export const MARKER_ICONS = {
   restaurant: '🍽️',
   ev_charging: '⚡',
   campground: '🏕️',
+  parking: '🅿️',
+  rest_stop: '🛑',
 };

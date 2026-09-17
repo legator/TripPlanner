@@ -105,6 +105,15 @@ export async function POST(request: NextRequest) {
     const message =
       error instanceof Error ? error.message : 'An unexpected error occurred';
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    const isRateLimit =
+      /rate limit|quota|exceeded|too many requests|over_query_limit|resource_exhausted/i.test(message);
+
+    return NextResponse.json(
+      {
+        error: message,
+        code: isRateLimit ? 'RATE_LIMIT_EXCEEDED' : 'PLAN_ERROR',
+      },
+      { status: isRateLimit ? 429 : 500 }
+    );
   }
 }

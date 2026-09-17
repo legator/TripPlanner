@@ -7,6 +7,7 @@ import { DAY_COLORS, MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/lib/constant
 import { decodePolyline } from '@/lib/tripGpxExport';
 import { callHereIsoline } from '@/lib/providers/here';
 import { LiveDrivingPosition, getCurrentCoordinates, reverseGeocodeCoordinates } from '@/lib/location';
+import { generateUUID } from '@/lib/uuid';
 
 const HERE_API_KEY = process.env.NEXT_PUBLIC_HERE_API_KEY || '';
 
@@ -134,14 +135,14 @@ export default function HereMapView({
           item?.address?.city || item?.address?.county || address.split(',')[0];
 
         onAddWaypointRef.current?.({
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name,
           address,
           location: { lat, lng },
         });
       } catch {
         onAddWaypointRef.current?.({
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
           address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
           location: { lat, lng },
@@ -179,17 +180,30 @@ export default function HereMapView({
 
     const fetchIncidents = async () => {
       try {
-        let apiUrl = '';
-        if (tripPlan?.overviewPolyline) {
-          apiUrl = `/api/traffic/incidents?corridor=${encodeURIComponent(tripPlan.overviewPolyline)}&radius=300&limit=60`;
+        let res: Response;
+        const activePolyline = tripPlan?.overviewPolyline;
+
+        if (activePolyline) {
+          res = await fetch('/api/traffic/incidents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              corridor: activePolyline,
+              radius: 300,
+              limit: 60,
+            }),
+          });
         } else if (waypoints.length > 0) {
-          apiUrl = `/api/traffic/incidents?lat=${waypoints[0].location.lat}&lng=${waypoints[0].location.lng}&radius=35000&limit=60`;
+          res = await fetch(
+            `/api/traffic/incidents?lat=${waypoints[0].location.lat}&lng=${waypoints[0].location.lng}&radius=35000&limit=60`
+          );
         } else {
           const center = mapInstanceRef.current.getCenter();
-          apiUrl = `/api/traffic/incidents?lat=${center.lat}&lng=${center.lng}&radius=35000&limit=60`;
+          res = await fetch(
+            `/api/traffic/incidents?lat=${center.lat}&lng=${center.lng}&radius=35000&limit=60`
+          );
         }
 
-        const res = await fetch(apiUrl);
         if (!res.ok) throw new Error('Failed to fetch incidents');
         const data = await res.json();
         if (!isSubscribed) return;
@@ -352,7 +366,7 @@ export default function HereMapView({
 
       const geocoded = await reverseGeocodeCoordinates(coords.lat, coords.lng, 'here');
       const wp: Waypoint = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         name: geocoded.name || 'Current Location',
         address: geocoded.address || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`,
         location: { lat: coords.lat, lng: coords.lng },
@@ -636,6 +650,16 @@ export default function HereMapView({
       // Attractions
       day.attractions.slice(0, 3).forEach((attr) => {
         addMarker(attr.location.lat, attr.location.lng, '⭐', attr.name);
+      });
+
+      // Parking & highway rest stops
+      (day.parkingStops || []).slice(0, 4).forEach((parking) => {
+        addMarker(
+          parking.location.lat,
+          parking.location.lng,
+          parking.parkingDetails?.isHighwayRestStop ? '🛑' : '🅿️',
+          parking.name
+        );
       });
     });
 

@@ -38,6 +38,8 @@ interface SidebarProps {
   onStartDriving?: (dayIndex?: number) => void;
   onSetStart?: (waypoint: Waypoint) => void;
   onToggleMobileMap?: () => void;
+  onOpenApiStatus?: () => void;
+  onOpenCityParking?: () => void;
 }
 
 export default function Sidebar({
@@ -58,12 +60,14 @@ export default function Sidebar({
   onOptimizeRoute,
   mapProvider,
   onChangeMapProvider,
+  onOpenApiStatus,
   onLoadSavedTrip,
   onOpenUpdateTripModal,
   onStartDayFromLocation,
   onStartDriving,
   onSetStart,
   onToggleMobileMap,
+  onOpenCityParking,
 }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -184,17 +188,31 @@ export default function Sidebar({
           </div>
         </div>
 
-        {onToggleMobileMap && (
-          <button
-            type="button"
-            onClick={onToggleMobileMap}
-            className="md:hidden px-3 py-1.5 bg-white/20 hover:bg-white/30 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow"
-            title="Switch to Map"
-          >
-            <span>🗺️</span>
-            <span>Map</span>
-          </button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {onOpenApiStatus && (
+            <button
+              type="button"
+              onClick={onOpenApiStatus}
+              className="px-2.5 py-1.5 bg-white/15 hover:bg-white/25 active:scale-95 text-white text-xs font-semibold rounded-xl flex items-center gap-1 transition-all shadow"
+              title="View API Quotas & Health Status"
+            >
+              <span>⚡</span>
+              <span className="hidden sm:inline">APIs</span>
+            </button>
+          )}
+
+          {onToggleMobileMap && (
+            <button
+              type="button"
+              onClick={onToggleMobileMap}
+              className="md:hidden px-3 py-1.5 bg-white/20 hover:bg-white/30 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow"
+              title="Switch to Map"
+            >
+              <span>🗺️</span>
+              <span>Map</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}
@@ -291,6 +309,7 @@ export default function Sidebar({
             onOpenUpdateTripModal={onOpenUpdateTripModal}
             onStartDayFromLocation={onStartDayFromLocation}
             onStartDriving={onStartDriving}
+            onOpenCityParking={onOpenCityParking}
             isPlanning={isPlanning}
             maxDistanceKm={settings.maxDistancePerDayKm}
             maxDrivingMinutes={settings.maxDrivingMinutesPerDay}

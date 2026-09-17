@@ -1,6 +1,7 @@
 'use client';
 
-import { TripPlan, TripSettings, Waypoint } from './types';
+import { Waypoint, TripSettings, TripPlan } from './types';
+import { generateUUID } from './uuid';
 
 const SAVED_TRIPS_KEY = 'tripplanner_saved_trips';
 const MAX_SAVED_TRIPS = 20;
@@ -52,7 +53,7 @@ export function saveTrip(
   existingId?: string
 ): SavedTrip {
   const trips = loadAll();
-  const id = existingId ?? crypto.randomUUID();
+  const id = existingId ?? generateUUID();
   const trip: SavedTrip = {
     id,
     name,

@@ -15,11 +15,19 @@ import { optimizeDayRoute } from '@/lib/tripOptimization';
 import { saveTripToStorage, loadTripFromStorage, clearTripFromStorage } from '@/lib/tripStorage';
 import { decodeTripFromURL, loadTripFromShareParam } from '@/lib/tripShare';
 import UpdateTripModal, { TripUpdateMode } from '@/components/UpdateTripModal';
+import CityParkingModal from '@/components/CityParkingModal';
 import DrivingHUD from '@/components/DrivingHUD';
 import { LiveDrivingPosition, watchCurrentPosition } from '@/lib/location';
-import { findActiveTripDayAndTarget } from '@/lib/routeProgress';
+import { findActiveTripDayAndTarget, findUpcomingStopOnDay, DayTargetStop } from '@/lib/routeProgress';
 import { requestScreenWakeLock, releaseScreenWakeLock } from '@/lib/wakeLock';
+import { generateUUID } from '@/lib/uuid';
 import { format } from 'date-fns';
+import RateLimitBanner from '@/components/RateLimitBanner';
+import ApiStatusModal from '@/components/ApiStatusModal';
+import { recordApiCall } from '@/lib/apiTracker';
+import { setDrivingStatusBar, updateDrivingNotification, clearDrivingNotification, setExitNavigationHandler } from '@/lib/drivingNotification';
+import { registerServiceWorker } from '@/lib/pwa';
+import { loadDrivingSession, clearDrivingSession } from '@/lib/driveSession';
 import type { UserEdits } from '@/lib/tripPlanEditor';
 import type { SavedTrip } from '@/lib/savedTrips';
 
@@ -39,6 +47,8 @@ export default function Home() {
   const [mapProvider, setMapProvider] = useState<MapProviderChoice | null | undefined>(null);
   const [focusedDrivingPlace, setFocusedDrivingPlace] = useState<Place | null>(null);
   const [mobileTab, setMobileTab] = useState<'sidebar' | 'map'>('sidebar');
+  const [isApiStatusModalOpen, setIsApiStatusModalOpen] = useState(false);
+  const [isCityParkingModalOpen, setIsCityParkingModalOpen] = useState(false);
 
   // Accumulated waypoints used for the active plan (includes search-added stops)
   const planWaypointsRef = useRef<Waypoint[]>([]);
@@ -82,9 +92,21 @@ export default function Home() {
       setSettings(saved.settings);
       if (saved.tripPlan) setTripPlan(saved.tripPlan);
       planWaypointsRef.current = [...saved.waypoints];
+
+      // Restore active driving session if user closed and reopened app
+      const activeSession = loadDrivingSession();
+      if (activeSession && saved.tripPlan) {
+        const targetDay = activeSession.dayIndex ?? 0;
+        setDrivingDayIndex(targetDay);
+        setSelectedDay(targetDay);
+        setIsDrivingMode(true);
+        setMobileTab('map');
+        setDrivingStatusBar(true, false);
+      }
     }
 
     setMapProvider(resolvedProvider);
+    registerServiceWorker();
     }; // end init
     init();
   }, []);
@@ -137,6 +159,7 @@ export default function Home() {
       });
 
       const data = await response.json();
+      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to plan trip');
@@ -249,6 +272,7 @@ export default function Home() {
         body: JSON.stringify({ waypoints: currentPlanWaypoints, settings, provider: mapProvider }),
       });
       const data = await response.json();
+      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
       if (!response.ok) throw new Error(data.error || 'Failed to re-plan trip');
 
       // Re-apply user edits (rest days, day-end choices) on the fresh plan
@@ -305,6 +329,7 @@ export default function Home() {
       setAutoFollow(true);
       setIsDrivingMode(true);
       setMobileTab('map');
+      setDrivingStatusBar(true, false);
     },
     [tripPlan, drivingPosition, selectedDay]
   );
@@ -312,7 +337,93 @@ export default function Home() {
   const handleExitDriving = useCallback(() => {
     setIsDrivingMode(false);
     setFocusedDrivingPlace(null);
+    setDrivingStatusBar(false);
+    clearDrivingNotification();
+    clearDrivingSession();
   }, []);
+
+  // Wire Android notification "Exit navigation" action to exit driving mode
+  useEffect(() => {
+    setExitNavigationHandler(() => {
+      handleExitDriving();
+    });
+  }, [handleExitDriving]);
+
+  // Recalculate route automatically when driver deviates from planned polyline
+  const handleReroute = useCallback(
+    async (fromLocation: { lat: number; lng: number }, targetStop: DayTargetStop) => {
+      if (!tripPlan) return;
+      try {
+        const activeDay = tripPlan.days[drivingDayIndex];
+        if (!activeDay) return;
+
+        const originWp: Waypoint = {
+          id: `reroute-${Date.now()}`,
+          name: 'Current Vehicle Position',
+          location: fromLocation,
+          address: `${fromLocation.lat.toFixed(4)}, ${fromLocation.lng.toFixed(4)}`,
+        };
+
+        const targetWp: Waypoint = {
+          id: targetStop.id,
+          name: targetStop.name,
+          location: targetStop.location,
+          address: targetStop.name,
+        };
+
+        const remainingStops: Waypoint[] = (activeDay.mainStops || [])
+          .slice(targetStop.stopIndex + 1)
+          .map((s, idx) => ({
+            id: `stop-${targetStop.stopIndex + 1 + idx}-${s.location.lat}`,
+            name: s.name,
+            location: s.location,
+            address: s.name,
+          }));
+
+        const endWp: Waypoint = {
+          id: `day-end-${activeDay.dayNumber}`,
+          name: activeDay.endLocation.name,
+          location: activeDay.endLocation.location,
+          address: activeDay.endLocation.name,
+        };
+
+        const rerouteWaypoints: Waypoint[] = [originWp, targetWp, ...remainingStops, endWp];
+
+        const res = await fetch('/api/plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            waypoints: rerouteWaypoints,
+            settings,
+            provider: mapProvider,
+          }),
+        });
+
+        if (res.ok) {
+          const freshPlan = await res.json();
+          if (freshPlan && freshPlan.days && freshPlan.days[0]) {
+            setTripPlan((prev) => {
+              if (!prev) return prev;
+              const updatedDays = [...prev.days];
+              updatedDays[drivingDayIndex] = {
+                ...activeDay,
+                polylineSegments: freshPlan.days[0].polylineSegments || activeDay.polylineSegments,
+                distanceKm: freshPlan.days[0].distanceKm || activeDay.distanceKm,
+                durationMinutes: freshPlan.days[0].durationMinutes || activeDay.durationMinutes,
+              };
+              return {
+                ...prev,
+                days: updatedDays,
+              };
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Off-route recalculation request error:', err);
+      }
+    },
+    [tripPlan, drivingDayIndex, settings, mapProvider]
+  );
 
   const handleRecenter = useCallback(() => {
     setAutoFollow(true);
@@ -341,6 +452,35 @@ export default function Home() {
       setAutoFollow(false);
     }
   }, [isDrivingMode]);
+
+  // Synchronize Android status bar and background notification with driving status
+  useEffect(() => {
+    if (!isDrivingMode || !tripPlan) return;
+    const activeDay = tripPlan.days[drivingDayIndex] || tripPlan.days[0];
+    if (!activeDay) return;
+
+    setDrivingStatusBar(true, false);
+
+    const upcoming = findUpcomingStopOnDay(
+      activeDay,
+      drivingDayIndex,
+      drivingPosition ? { lat: drivingPosition.lat, lng: drivingPosition.lng } : null
+    );
+    if (upcoming && upcoming.targetStop) {
+      const speedKmh = drivingPosition?.speed != null ? Math.round(drivingPosition.speed * 3.6) : undefined;
+      const effectiveSpeed = speedKmh && speedKmh > 20 ? speedKmh : 70;
+      const driveTimeMin = Math.round((upcoming.distanceToTargetKm / effectiveSpeed) * 60);
+
+      updateDrivingNotification({
+        targetStopName: upcoming.targetStop.name,
+        distanceKm: upcoming.distanceToTargetKm,
+        driveTimeMin,
+        speedKmh,
+        dayIndex: drivingDayIndex,
+        totalDays: tripPlan.totalDays,
+      });
+    }
+  }, [isDrivingMode, drivingPosition, drivingDayIndex, tripPlan]);
 
   const handleConfirmTripUpdate = useCallback(async ({
     mode,
@@ -399,14 +539,14 @@ export default function Home() {
             if (d.isRestDay) continue;
             for (const ms of d.mainStops) {
               remainingStops.push({
-                id: crypto.randomUUID(),
+                id: generateUUID(),
                 name: ms.name,
                 address: ms.name,
                 location: ms.location,
               });
             }
             remainingStops.push({
-              id: crypto.randomUUID(),
+              id: generateUUID(),
               name: d.endLocation.name,
               address: d.endLocation.name,
               location: d.endLocation.location,
@@ -436,6 +576,7 @@ export default function Home() {
       });
 
       const data = await response.json();
+      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
       if (!response.ok) {
         throw new Error(data.error || 'Failed to update trip route');
       }
@@ -486,6 +627,8 @@ export default function Home() {
         onChangeMapProvider={() => setMapProvider(undefined)}
         onLoadSavedTrip={handleLoadSavedTrip}
         onToggleMobileMap={() => setMobileTab('map')}
+        onOpenApiStatus={() => setIsApiStatusModalOpen(true)}
+        onOpenCityParking={() => setIsCityParkingModalOpen(true)}
       />
     </ErrorBoundary>
   );
@@ -515,27 +658,74 @@ export default function Home() {
     />
   ) : null;
 
-  const activeDrivingDay = tripPlan?.days[drivingDayIndex] || tripPlan?.days[0];
-  const drivingHudEl = isDrivingMode && tripPlan && activeDrivingDay ? (
-    <DrivingHUD
-      day={activeDrivingDay}
-      dayIndex={drivingDayIndex}
-      totalDays={tripPlan.totalDays}
-      currentPosition={drivingPosition}
-      autoFollow={autoFollow}
-      onRecenter={handleRecenter}
-      onExit={handleExitDriving}
-      wakeLockActive={wakeLockActive}
-      onFocusPlace={handleFocusPlace}
-      onAddStop={handleAddStopFromDriving}
-      mapProvider={mapProvider ?? undefined}
-      tripPlan={tripPlan}
-      onChangeDay={(newDay) => {
-        setDrivingDayIndex(newDay);
-        setSelectedDay(newDay);
+  const cityParkingModalEl = (
+    <CityParkingModal
+      isOpen={isCityParkingModalOpen}
+      onClose={() => setIsCityParkingModalOpen(false)}
+      waypoints={waypoints}
+      onAddStop={(waypoint, insertIndex) => {
+        setWaypoints((prev) => {
+          const next = [...prev];
+          if (insertIndex !== undefined && insertIndex >= 0 && insertIndex <= next.length) {
+            next.splice(insertIndex, 0, waypoint);
+          } else {
+            next.push(waypoint);
+          }
+          return next;
+        });
       }}
     />
-  ) : null;
+  );
+
+  const activeDrivingDay = tripPlan?.days[drivingDayIndex] || tripPlan?.days[0];
+  const drivingHudEl =
+    isDrivingMode && tripPlan && activeDrivingDay ? (
+      <DrivingHUD
+        day={activeDrivingDay}
+        dayIndex={drivingDayIndex}
+        totalDays={tripPlan.totalDays}
+        currentPosition={drivingPosition}
+        autoFollow={autoFollow}
+        onRecenter={handleRecenter}
+        onExit={handleExitDriving}
+        wakeLockActive={wakeLockActive}
+        onFocusPlace={handleFocusPlace}
+        onAddStop={handleAddStopFromDriving}
+        mapProvider={mapProvider ?? undefined}
+        tripPlan={tripPlan}
+        onReroute={handleReroute}
+        onChangeDay={(newDay) => {
+          setDrivingDayIndex(newDay);
+          setSelectedDay(newDay);
+        }}
+      />
+    ) : null;
+
+  const rateLimitBannerEl = (
+    <RateLimitBanner
+      error={error}
+      activeProvider={mapProvider === 'here' ? 'here' : 'google'}
+      onSwitchProvider={(nextProv) => {
+        handlePickProvider(nextProv);
+        setError(null);
+      }}
+      onRetry={() => handlePlanTrip()}
+      onOpenStatusModal={() => setIsApiStatusModalOpen(true)}
+      onDismiss={() => setError(null)}
+    />
+  );
+
+  const apiStatusModalEl = (
+    <ApiStatusModal
+      isOpen={isApiStatusModalOpen}
+      onClose={() => setIsApiStatusModalOpen(false)}
+      activeProvider={mapProvider === 'here' ? 'here' : 'google'}
+      onSwitchProvider={(nextProv) => {
+        handlePickProvider(nextProv);
+        setIsApiStatusModalOpen(false);
+      }}
+    />
+  );
 
   const mobileMapControls = !isDrivingMode && (
     <div className="md:hidden absolute bottom-5 left-4 right-4 z-20 pointer-events-none flex flex-col gap-2 items-center safe-pb">
@@ -587,6 +777,9 @@ export default function Home() {
     return (
       <HereMapsProvider>
         <div className="flex h-screen h-[100dvh] w-screen overflow-hidden bg-gray-100 relative">
+          <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
+            {rateLimitBannerEl}
+          </div>
           <div className={sidebarContainerClass}>
             {sidebarEl}
           </div>
@@ -610,6 +803,8 @@ export default function Home() {
             {drivingHudEl}
           </div>
           {updateModalEl}
+          {apiStatusModalEl}
+          {cityParkingModalEl}
         </div>
       </HereMapsProvider>
     );
@@ -618,6 +813,9 @@ export default function Home() {
   return (
     <GoogleMapsProvider>
       <div className="flex h-screen h-[100dvh] w-screen overflow-hidden bg-gray-100 relative">
+        <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
+          {rateLimitBannerEl}
+        </div>
         <div className={sidebarContainerClass}>
           {sidebarEl}
         </div>
@@ -641,6 +839,8 @@ export default function Home() {
           {drivingHudEl}
         </div>
         {updateModalEl}
+        {apiStatusModalEl}
+        {cityParkingModalEl}
       </div>
     </GoogleMapsProvider>
   );
