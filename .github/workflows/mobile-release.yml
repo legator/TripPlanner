@@ -127,7 +127,7 @@ jobs:
   release-ios:
     name: Release to Apple TestFlight
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'ios'
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Checkout repository

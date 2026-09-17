@@ -24,6 +24,7 @@ const config: CapacitorConfig = {
       '@capacitor/geolocation',
       '@capacitor/haptics',
       '@capacitor/local-notifications',
+      '@capacitor/status-bar',
     ],
   },
   plugins: {
