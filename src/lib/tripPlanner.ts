@@ -257,7 +257,7 @@ export async function planTrip(
         }
 
         // Lunch break near midpoint of driving
-        if (i === Math.floor(numSegments / 2) && numSegments > 1 || (numSegments === 1 && segDurationMin > 120)) {
+        if ((i === Math.floor(numSegments / 2) && numSegments > 1) || (numSegments === 1 && segDurationMin > 120)) {
           schedule.push({
             type: 'lunch',
             time: cursor,
@@ -539,8 +539,12 @@ async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number, pr
   if (samplePoints.length === 0 && totalKm > intervalKm * 0.8) samplePoints.push(getMidpointOfLegs(legs));
   const seen = new Set<string>();
   const results: Place[] = [];
-  for (const point of samplePoints.slice(0, 3)) {
-    const stations = await findNearby(point, 'gas_station', SEARCH_RADIUS.GAS_STATION, 2, preferred);
+  const allStations = await Promise.all(
+    samplePoints.slice(0, 3).map((point) =>
+      findNearby(point, 'gas_station', SEARCH_RADIUS.GAS_STATION, 2, preferred)
+    )
+  );
+  for (const stations of allStations) {
     for (const s of stations) { if (!seen.has(s.id)) { seen.add(s.id); results.push(s); } }
   }
   return results;
@@ -548,13 +552,15 @@ async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number, pr
 
 async function findAttractions(legs: RouteLeg[], preferred?: MapProviderName): Promise<Place[]> {
   const midpoint = getMidpointOfLegs(legs);
-  const attractions = await findNearby(midpoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 5, preferred);
-  if (legs.length > 1) {
-    const endPoint = legs[legs.length - 1].endLocation;
-    const endAttractions = await findNearby(endPoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 3, preferred);
-    const seen = new Set(attractions.map((a) => a.id));
-    for (const attr of endAttractions) { if (!seen.has(attr.id)) attractions.push(attr); }
-  }
+  const fetchEnd = legs.length > 1
+    ? findNearby(legs[legs.length - 1].endLocation, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 3, preferred)
+    : Promise.resolve<Place[]>([]);
+  const [attractions, endAttractions] = await Promise.all([
+    findNearby(midpoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 5, preferred),
+    fetchEnd,
+  ]);
+  const seen = new Set(attractions.map((a) => a.id));
+  for (const attr of endAttractions) { if (!seen.has(attr.id)) attractions.push(attr); }
   return attractions.slice(0, 6);
 }
 
@@ -570,8 +576,12 @@ async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number, pre
   if (samplePoints.length === 0) samplePoints = [getMidpointOfLegs(legs)];
   const seen = new Set<string>();
   const results: Place[] = [];
-  for (const point of samplePoints.slice(0, 3)) {
-    const stations = await findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2, preferred);
+  const allStations = await Promise.all(
+    samplePoints.slice(0, 3).map((point) =>
+      findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2, preferred)
+    )
+  );
+  for (const stations of allStations) {
     for (const s of stations) { if (!seen.has(s.id)) { seen.add(s.id); results.push(s); } }
   }
   return results;

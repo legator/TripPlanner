@@ -24,10 +24,10 @@ import { generateUUID } from '@/lib/uuid';
 import { format } from 'date-fns';
 import RateLimitBanner from '@/components/RateLimitBanner';
 import ApiStatusModal from '@/components/ApiStatusModal';
-import { recordApiCall } from '@/lib/apiTracker';
 import { setDrivingStatusBar, updateDrivingNotification, clearDrivingNotification, setExitNavigationHandler } from '@/lib/drivingNotification';
 import { registerServiceWorker } from '@/lib/pwa';
 import { loadDrivingSession, clearDrivingSession } from '@/lib/driveSession';
+import { planTripRequest } from '@/lib/tripPlannerClient';
 import type { UserEdits } from '@/lib/tripPlanEditor';
 import type { SavedTrip } from '@/lib/savedTrips';
 
@@ -134,9 +134,13 @@ export default function Home() {
     };
   }, [isDrivingMode]);
 
-  // Auto-save whenever waypoints, settings, or tripPlan changes
+  // Auto-save whenever waypoints, settings, or tripPlan changes (debounced to
+  // avoid serialising the full trip state on every keystroke in settings fields)
   useEffect(() => {
-    saveTripToStorage(waypoints, settings, tripPlan);
+    const timer = setTimeout(() => {
+      saveTripToStorage(waypoints, settings, tripPlan);
+    }, 400);
+    return () => clearTimeout(timer);
   }, [waypoints, settings, tripPlan]);
 
   const handlePlanTrip = useCallback(async () => {
@@ -152,19 +156,7 @@ export default function Home() {
     planWaypointsRef.current = [...waypoints];
 
     try {
-      const response = await fetch('/api/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waypoints, settings, provider: mapProvider }),
-      });
-
-      const data = await response.json();
-      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to plan trip');
-      }
-
+      const data = await planTripRequest(waypoints, settings, mapProvider);
       setTripPlan(data);
       setSelectedDay(null);
       setMobileTab('map');
@@ -266,20 +258,9 @@ export default function Home() {
     setIsPlanning(true);
     setError(null);
     try {
-      const response = await fetch('/api/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waypoints: currentPlanWaypoints, settings, provider: mapProvider }),
-      });
-      const data = await response.json();
-      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
-      if (!response.ok) throw new Error(data.error || 'Failed to re-plan trip');
-
+      const data = await planTripRequest(currentPlanWaypoints, settings, mapProvider);
       // Re-apply user edits (rest days, day-end choices) on the fresh plan
-      const finalPlan = applyUserEdits(
-        data,
-        userEditsRef.current
-      );
+      const finalPlan = applyUserEdits(data, userEditsRef.current);
       setTripPlan(finalPlan);
       setSelectedDay(null);
     } catch (err) {
@@ -353,70 +334,58 @@ export default function Home() {
   const handleReroute = useCallback(
     async (fromLocation: { lat: number; lng: number }, targetStop: DayTargetStop) => {
       if (!tripPlan) return;
+      const activeDay = tripPlan.days[drivingDayIndex];
+      if (!activeDay) return;
+
+      const originWp: Waypoint = {
+        id: `reroute-${Date.now()}`,
+        name: 'Current Vehicle Position',
+        location: fromLocation,
+        address: `${fromLocation.lat.toFixed(4)}, ${fromLocation.lng.toFixed(4)}`,
+      };
+
+      const targetWp: Waypoint = {
+        id: targetStop.id,
+        name: targetStop.name,
+        location: targetStop.location,
+        address: targetStop.name,
+      };
+
+      const remainingStops: Waypoint[] = (activeDay.mainStops || [])
+        .slice(targetStop.stopIndex + 1)
+        .map((s, idx) => ({
+          id: `stop-${targetStop.stopIndex + 1 + idx}-${s.location.lat}`,
+          name: s.name,
+          location: s.location,
+          address: s.name,
+        }));
+
+      const endWp: Waypoint = {
+        id: `day-end-${activeDay.dayNumber}`,
+        name: activeDay.endLocation.name,
+        location: activeDay.endLocation.location,
+        address: activeDay.endLocation.name,
+      };
+
+      const rerouteWaypoints: Waypoint[] = [originWp, targetWp, ...remainingStops, endWp];
+
       try {
-        const activeDay = tripPlan.days[drivingDayIndex];
-        if (!activeDay) return;
-
-        const originWp: Waypoint = {
-          id: `reroute-${Date.now()}`,
-          name: 'Current Vehicle Position',
-          location: fromLocation,
-          address: `${fromLocation.lat.toFixed(4)}, ${fromLocation.lng.toFixed(4)}`,
-        };
-
-        const targetWp: Waypoint = {
-          id: targetStop.id,
-          name: targetStop.name,
-          location: targetStop.location,
-          address: targetStop.name,
-        };
-
-        const remainingStops: Waypoint[] = (activeDay.mainStops || [])
-          .slice(targetStop.stopIndex + 1)
-          .map((s, idx) => ({
-            id: `stop-${targetStop.stopIndex + 1 + idx}-${s.location.lat}`,
-            name: s.name,
-            location: s.location,
-            address: s.name,
-          }));
-
-        const endWp: Waypoint = {
-          id: `day-end-${activeDay.dayNumber}`,
-          name: activeDay.endLocation.name,
-          location: activeDay.endLocation.location,
-          address: activeDay.endLocation.name,
-        };
-
-        const rerouteWaypoints: Waypoint[] = [originWp, targetWp, ...remainingStops, endWp];
-
-        const res = await fetch('/api/plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            waypoints: rerouteWaypoints,
-            settings,
-            provider: mapProvider,
-          }),
-        });
-
-        if (res.ok) {
-          const freshPlan = await res.json();
-          if (freshPlan && freshPlan.days && freshPlan.days[0]) {
-            setTripPlan((prev) => {
-              if (!prev) return prev;
-              const updatedDays = [...prev.days];
-              updatedDays[drivingDayIndex] = {
-                ...activeDay,
-                polylineSegments: freshPlan.days[0].polylineSegments || activeDay.polylineSegments,
-                distanceKm: freshPlan.days[0].distanceKm || activeDay.distanceKm,
-                durationMinutes: freshPlan.days[0].durationMinutes || activeDay.durationMinutes,
-              };
-              return {
-                ...prev,
-                days: updatedDays,
-              };
-            });
-          }
+        const freshPlan = await planTripRequest(rerouteWaypoints, settings, mapProvider);
+        if (freshPlan.days && freshPlan.days[0]) {
+          setTripPlan((prev) => {
+            if (!prev) return prev;
+            const updatedDays = [...prev.days];
+            updatedDays[drivingDayIndex] = {
+              ...activeDay,
+              polylineSegments: freshPlan.days[0].polylineSegments || activeDay.polylineSegments,
+              distanceKm: freshPlan.days[0].distanceKm || activeDay.distanceKm,
+              durationMinutes: freshPlan.days[0].durationMinutes || activeDay.durationMinutes,
+            };
+            return {
+              ...prev,
+              days: updatedDays,
+            };
+          });
         }
       } catch (err) {
         console.warn('Off-route recalculation request error:', err);
@@ -569,17 +538,7 @@ export default function Home() {
       setSettings(updatedSettings);
       planWaypointsRef.current = [...newWaypoints];
 
-      const response = await fetch('/api/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waypoints: newWaypoints, settings: updatedSettings, provider: mapProvider }),
-      });
-
-      const data = await response.json();
-      recordApiCall(mapProvider === 'here' ? 'here' : 'google', response.ok, response.status, data.error);
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to update trip route');
-      }
+      const data = await planTripRequest(newWaypoints, updatedSettings, mapProvider);
 
       const finalPlan = applyUserEdits(data, userEditsRef.current);
       setTripPlan(finalPlan);

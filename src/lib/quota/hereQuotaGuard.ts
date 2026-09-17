@@ -82,16 +82,7 @@ export interface HereUsageSummary {
   services: HereServiceUsageSummary[];
 }
 
-// ─── Redis Connection Helper ──────────────────────────────────────────────────
-
-function getRedisCredentials(): { url: string; token: string } | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-  if (url && token) {
-    return { url, token };
-  }
-  return null;
-}
+import { getRedisClient } from '../redisClient';
 
 // ─── Local fallback store (persists across Next.js API chunks via globalThis) ─
 
@@ -120,17 +111,14 @@ export async function checkAndIncrementHereQuota(
   count: number = 1
 ): Promise<{ remaining: number; totalUsed: number }> {
   const month = getCurrentMonthKey();
-  const creds = getRedisCredentials();
   const serviceLimit = HERE_QUOTA_LIMITS[service].limit;
 
   const totalKey = `here:usage:total:${month}`;
   const serviceKey = `here:usage:${service}:${month}`;
 
-  if (creds) {
+  const redis = await getRedisClient();
+  if (redis) {
     try {
-      const { Redis } = await import('@upstash/redis');
-      const redis = new Redis({ url: creds.url, token: creds.token });
-
       // Read current values first (pre-flight check)
       const [rawTotal, rawService] = await redis.mget<[number | null, number | null]>(
         totalKey,
@@ -195,8 +183,8 @@ export async function checkAndIncrementHereQuota(
  */
 export async function getHereUsageSummary(): Promise<HereUsageSummary> {
   const month = getCurrentMonthKey();
-  const creds = getRedisCredentials();
-  const isRedisConnected = !!creds;
+  const redis = await getRedisClient();
+  const isRedisConnected = redis !== null;
 
   const totalKey = `here:usage:total:${month}`;
   const serviceKeys = (Object.keys(HERE_QUOTA_LIMITS) as HereServiceType[]).map(
@@ -213,11 +201,8 @@ export async function getHereUsageSummary(): Promise<HereUsageSummary> {
     isoline: 0,
   };
 
-  if (creds) {
+  if (redis) {
     try {
-      const { Redis } = await import('@upstash/redis');
-      const redis = new Redis({ url: creds.url, token: creds.token });
-
       const values = await redis.mget<Array<number | null>>(totalKey, ...serviceKeys);
       currentTotal = Number(values[0]) || 0;
 
