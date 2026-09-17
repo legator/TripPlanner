@@ -1,0 +1,238 @@
+name: Mobile Store Release (Google Play & TestFlight)
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Target platform to release'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'android'
+          - 'ios'
+      track:
+        description: 'Google Play track (Android only)'
+        required: true
+        default: 'internal'
+        type: choice
+        options:
+          - 'internal'
+          - 'alpha'
+          - 'beta'
+          - 'production'
+      server_url:
+        description: 'Target WebView Server URL (e.g. https://my-app.vercel.app)'
+        required: false
+        default: ''
+        type: string
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Android: Build Signed .aab & Publish to Google Play Internal Testing
+  # --------------------------------------------------------------------------
+  release-android:
+    name: Release to Google Play
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'android'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Android Release Credentials
+        id: check_android_secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$SERVICE_ACCOUNT_JSON" ]; then
+            echo "::warning::Google Play release skipped: Required secrets (ANDROID_KEYSTORE_BASE64, GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) are not configured."
+            echo "configured=false" >> $GITHUB_OUTPUT
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js application
+        run: npm run build
+        env:
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyDemoKeyForCiBuildPurposesOnly12345' }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY || 'AIzaSyDemoKeyForCiBuildPurposesOnly12345' }}
+          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || secrets.CAPACITOR_SERVER_URL || '' }}
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+        env:
+          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || secrets.CAPACITOR_SERVER_URL || '' }}
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Build Android Release Bundle (.aab)
+        run: |
+          cd android
+          ./gradlew bundleRelease --stacktrace
+
+      - name: Sign Android Release Bundle
+        if: steps.check_android_secrets.outputs.configured == 'true'
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: android/app/build/outputs/bundle/release
+          signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload to Google Play
+        if: steps.check_android_secrets.outputs.configured == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.tripplanner.app
+          releaseFiles: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          track: ${{ github.event.inputs.track || 'internal' }}
+          status: completed
+
+      - name: Upload Release AAB as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trip-planner-android-release-bundle
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+  # --------------------------------------------------------------------------
+  # iOS: Build Signed .ipa & Publish to Apple TestFlight
+  # --------------------------------------------------------------------------
+  release-ios:
+    name: Release to Apple TestFlight
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'ios'
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify iOS Release Credentials
+        id: check_ios_secrets
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          CERT_P12: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if [ -z "$API_KEY_ID" ] || [ -z "$API_ISSUER_ID" ] || [ -z "$API_KEY_P8" ] || [ -z "$CERT_P12" ] || [ -z "$PROFILE" ]; then
+            echo "::warning::TestFlight upload skipped: Required secrets (APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8, APPLE_CERTIFICATE_BASE64, APPLE_PROVISIONING_PROFILE_BASE64) are not configured."
+            echo "configured=false" >> $GITHUB_OUTPUT
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js application
+        run: npm run build
+        env:
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyDemoKeyForCiBuildPurposesOnly12345' }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY || 'AIzaSyDemoKeyForCiBuildPurposesOnly12345' }}
+          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || secrets.CAPACITOR_SERVER_URL || '' }}
+
+      - name: Sync Capacitor iOS
+        run: npx cap sync ios
+        env:
+          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || secrets.CAPACITOR_SERVER_URL || '' }}
+
+      - name: Install Apple Certificate
+        if: steps.check_ios_secrets.outputs.configured == 'true'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Install Provisioning Profile
+        if: steps.check_ios_secrets.outputs.configured == 'true'
+        env:
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$PROVISIONING_PROFILE_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+
+      - name: Create ExportOptions.plist
+        if: steps.check_ios_secrets.outputs.configured == 'true'
+        run: |
+          cat <<EOF > ExportOptions.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>destination</key>
+            <string>export</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Build & Archive Xcode Project
+        if: steps.check_ios_secrets.outputs.configured == 'true'
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -archivePath build/App.xcarchive \
+            archive
+
+      - name: Export IPA
+        if: steps.check_ios_secrets.outputs.configured == 'true'
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/out
+
+      - name: Upload to Apple TestFlight
+        if: steps.check_ios_secrets.outputs.configured == 'true'
+        uses: apple-actions/upload-testflight-build@v1
+        with:
+          app-path: build/out/App.ipa
+          issuer-id: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+
+      - name: Upload IPA as Artifact
+        if: steps.check_ios_secrets.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trip-planner-ios-release-ipa
+          path: build/out/*.ipa
+          retention-days: 30
