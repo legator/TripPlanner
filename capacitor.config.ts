@@ -18,6 +18,14 @@ const config: CapacitorConfig = {
         cleartext: serverUrl.startsWith('http://'),
       }
     : undefined,
+  ios: {
+    includePlugins: [
+      '@capacitor-community/keep-awake',
+      '@capacitor/geolocation',
+      '@capacitor/haptics',
+      '@capacitor/local-notifications',
+    ],
+  },
   plugins: {
     StatusBar: {
       style: 'DARK',
