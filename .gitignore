@@ -35,3 +35,15 @@ next-env.d.ts
 
 # dev fixtures / local mocks
 weather.json
+
+# mobile signing credentials & certificates
+*.p12
+*.mobileprovision
+*.p8
+*.keystore
+*.jks
+
+# internal documentation
+docs/testflight-setup.md
+docs/TESTFLIGHT_SETUP.md
+docs/*internal*
