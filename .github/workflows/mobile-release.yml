@@ -238,6 +238,7 @@ jobs:
             -scheme App \
             -configuration Release \
             -archivePath build/App.xcarchive \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             archive
 
       - name: Export IPA
