@@ -8,8 +8,11 @@ import { decodePolyline } from '@/lib/tripGpxExport';
 import { callHereIsoline } from '@/lib/providers/here';
 import { LiveDrivingPosition, getCurrentCoordinates, reverseGeocodeCoordinates } from '@/lib/location';
 import { generateUUID } from '@/lib/uuid';
+import { getCustomKey, getApiAuthHeaders } from '@/lib/userKeys';
 
-const HERE_API_KEY = process.env.NEXT_PUBLIC_HERE_API_KEY || '';
+function getEffectiveHereKey(): string {
+  return getCustomKey('here') || process.env.NEXT_PUBLIC_HERE_API_KEY || '';
+}
 
 interface HereMapViewProps {
   waypoints: Waypoint[];
@@ -86,7 +89,8 @@ export default function HereMapView({
     if (!isLoaded || !mapRef.current || mapInstanceRef.current) return;
 
     const H = window.H;
-    const platform = new H.service.Platform({ apikey: HERE_API_KEY });
+    const apiKey = getEffectiveHereKey();
+    const platform = new H.service.Platform({ apikey: apiKey });
     platformRef.current = platform;
 
     const defaultLayers = platform.createDefaultLayers();
@@ -124,7 +128,7 @@ export default function HereMapView({
 
       try {
         const url = new URL('https://revgeocode.search.hereapi.com/v1/revgeocode');
-        url.searchParams.set('apiKey', HERE_API_KEY);
+        url.searchParams.set('apiKey', apiKey);
         url.searchParams.set('at', `${lat},${lng}`);
         url.searchParams.set('lang', 'en');
         const res = await fetch(url.toString());
@@ -182,11 +186,12 @@ export default function HereMapView({
       try {
         let res: Response;
         const activePolyline = tripPlan?.overviewPolyline;
+        const authHeaders = getApiAuthHeaders();
 
         if (activePolyline) {
           res = await fetch('/api/traffic/incidents', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
             body: JSON.stringify({
               corridor: activePolyline,
               radius: 300,
@@ -195,12 +200,14 @@ export default function HereMapView({
           });
         } else if (waypoints.length > 0) {
           res = await fetch(
-            `/api/traffic/incidents?lat=${waypoints[0].location.lat}&lng=${waypoints[0].location.lng}&radius=35000&limit=60`
+            `/api/traffic/incidents?lat=${waypoints[0].location.lat}&lng=${waypoints[0].location.lng}&radius=35000&limit=60`,
+            { headers: authHeaders }
           );
         } else {
           const center = mapInstanceRef.current.getCenter();
           res = await fetch(
-            `/api/traffic/incidents?lat=${center.lat}&lng=${center.lng}&radius=35000&limit=60`
+            `/api/traffic/incidents?lat=${center.lat}&lng=${center.lng}&radius=35000&limit=60`,
+            { headers: authHeaders }
           );
         }
 

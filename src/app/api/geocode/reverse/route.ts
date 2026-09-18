@@ -22,7 +22,8 @@ export async function GET(request: NextRequest) {
 
   // ── 1. Try HERE Reverse Geocoding ──────────────────────────────────────────
   if (provider === 'here') {
-    const hereKey = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY;
+    const customHereKey = request.headers.get('x-custom-here-key') || undefined;
+    const hereKey = customHereKey || process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY;
     if (hereKey && hereKey !== 'your_here_api_key_here') {
       try {
         const url = new URL('https://revgeocode.search.hereapi.com/v1/revgeocode');
@@ -59,7 +60,8 @@ export async function GET(request: NextRequest) {
   }
 
   // ── 2. Try Google Reverse Geocoding ────────────────────────────────────────
-  const googleKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const customGoogleKey = request.headers.get('x-custom-google-key') || undefined;
+  const googleKey = customGoogleKey || process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   if (googleKey && googleKey !== 'your_google_maps_api_key_here') {
     try {
       const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');

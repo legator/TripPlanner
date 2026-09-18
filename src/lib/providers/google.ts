@@ -4,7 +4,7 @@
 import { Waypoint, TripSettings } from '../types';
 import { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';
 
-const API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!;
+const DEFAULT_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!;
 
 // ─── Directions API ──────────────────────────────────────────────────────────
 
@@ -37,16 +37,18 @@ async function callDirectionsAPI(
   origin: Waypoint,
   destination: Waypoint,
   intermediates: Waypoint[],
-  settings: TripSettings
+  settings: TripSettings,
+  apiKey?: string
 ): Promise<GDirectionsRoute> {
   const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
+  const key = apiKey || DEFAULT_API_KEY;
 
   const toParam = (wp: Waypoint) =>
     wp.placeId ? `place_id:${wp.placeId}` : `${wp.location.lat},${wp.location.lng}`;
 
   url.searchParams.set('origin', toParam(origin));
   url.searchParams.set('destination', toParam(destination));
-  url.searchParams.set('key', API_KEY);
+  url.searchParams.set('key', key);
   url.searchParams.set('units', 'metric');
 
   if (intermediates.length > 0) {
@@ -144,83 +146,90 @@ function mapPriceLevel(priceLevel?: string): number | undefined {
 
 // ─── Provider implementation ─────────────────────────────────────────────────
 
-export const googleProvider: RoutingProvider = {
-  async getRoute(origin, destination, intermediates, settings): Promise<RouteResult> {
-    const route = await callDirectionsAPI(origin, destination, intermediates, settings);
-    return {
-      legs: route.legs.map(normalizeGoogleLeg),
-      waypointOrder: route.waypoint_order || [],
-      overviewPolyline: route.overview_polyline.points,
-    };
-  },
+export function createGoogleProvider(apiKeyOverride?: string): RoutingProvider {
+  const activeKey = apiKeyOverride?.trim() || DEFAULT_API_KEY;
 
-  async searchNearby(location, type, radius, maxResults = 5): Promise<NearbyPlace[]> {
-    const url = 'https://places.googleapis.com/v1/places:searchNearby';
-    const typeMap: Record<string, string[]> = {
-      gas_station: ['gas_station'],
-      restaurant: ['restaurant', 'cafe', 'fast_food_restaurant'],
-      cafe: ['cafe', 'coffee_shop'],
-      rest_stop: ['rest_stop', 'park', 'tourist_attraction'],
-      lodging: ['hotel', 'motel', 'lodging'],
-      parking: ['parking'],
-    };
-    const body = {
-      includedTypes: typeMap[type] || [type],
-      maxResultCount: Math.min(maxResults, 20),
-      locationRestriction: {
-        circle: {
-          center: { latitude: location.lat, longitude: location.lng },
-          radius,
+  return {
+    async getRoute(origin, destination, intermediates, settings): Promise<RouteResult> {
+      const route = await callDirectionsAPI(origin, destination, intermediates, settings, activeKey);
+      return {
+        legs: route.legs.map(normalizeGoogleLeg),
+        waypointOrder: route.waypoint_order || [],
+        overviewPolyline: route.overview_polyline.points,
+      };
+    },
+
+    async searchNearby(location, type, radius, maxResults = 5): Promise<NearbyPlace[]> {
+      const url = 'https://places.googleapis.com/v1/places:searchNearby';
+      const typeMap: Record<string, string[]> = {
+        gas_station: ['gas_station'],
+        restaurant: ['restaurant', 'cafe', 'fast_food_restaurant'],
+        cafe: ['cafe', 'coffee_shop'],
+        rest_stop: ['rest_stop', 'park', 'tourist_attraction'],
+        lodging: ['hotel', 'motel', 'lodging'],
+        parking: ['parking'],
+      };
+      const body = {
+        includedTypes: typeMap[type] || [type],
+        maxResultCount: Math.min(maxResults, 20),
+        locationRestriction: {
+          circle: {
+            center: { latitude: location.lat, longitude: location.lng },
+            radius,
+          },
         },
-      },
-      rankPreference: 'POPULARITY',
-    };
+        rankPreference: 'POPULARITY',
+      };
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': API_KEY,
-          'X-Goog-FieldMask':
-            'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.shortFormattedAddress,places.currentOpeningHours,places.photos',
-        },
-        body: JSON.stringify(body),
-      });
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': activeKey,
+            'X-Goog-FieldMask':
+              'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.shortFormattedAddress,places.currentOpeningHours,places.photos',
+          },
+          body: JSON.stringify(body),
+        });
 
-      const data = await response.json();
-      if (data.error) return [];
+        const data = await response.json();
+        if (data.error) return [];
 
-      interface GPlace {
-        id?: string;
-        displayName?: { text?: string };
-        formattedAddress?: string;
-        location?: { latitude?: number; longitude?: number };
-        rating?: number;
-        priceLevel?: string;
-        currentOpeningHours?: { openNow?: boolean };
-        photos?: Array<{ name?: string }>;
+        interface GPlace {
+          id?: string;
+          displayName?: { text?: string };
+          formattedAddress?: string;
+          location?: { latitude?: number; longitude?: number };
+          rating?: number;
+          priceLevel?: string;
+          currentOpeningHours?: { openNow?: boolean };
+          photos?: Array<{ name?: string }>;
+        }
+        const publicKey = apiKeyOverride || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+        return (data.places || []).map((place: GPlace): NearbyPlace => ({
+          id: place.id || '',
+          name: place.displayName?.text || 'Unknown',
+          address: place.formattedAddress || '',
+          location: {
+            lat: place.location?.latitude || 0,
+            lng: place.location?.longitude || 0,
+          },
+          type,
+          rating: place.rating,
+          priceLevel: mapPriceLevel(place.priceLevel),
+          isOpen: place.currentOpeningHours?.openNow,
+          // Only include a client-usable photo URL if a browser-restricted key is available.
+          photoUrl: place.photos?.[0]?.name && publicKey
+            ? `https://places.googleapis.com/v1/${place.photos[0].name}/media?maxWidthPx=200&key=${publicKey}`
+            : undefined,
+        }));
+      } catch {
+        return [];
       }
-      const publicKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-      return (data.places || []).map((place: GPlace): NearbyPlace => ({
-        id: place.id || '',
-        name: place.displayName?.text || 'Unknown',
-        address: place.formattedAddress || '',
-        location: {
-          lat: place.location?.latitude || 0,
-          lng: place.location?.longitude || 0,
-        },
-        type,
-        rating: place.rating,
-        priceLevel: mapPriceLevel(place.priceLevel),
-        isOpen: place.currentOpeningHours?.openNow,
-        // Only include a client-usable photo URL if a browser-restricted key is available.
-        photoUrl: place.photos?.[0]?.name && publicKey
-          ? `https://places.googleapis.com/v1/${place.photos[0].name}/media?maxWidthPx=200&key=${publicKey}`
-          : undefined,
-      }));
-    } catch {
-      return [];
-    }
-  },
-};
+    },
+  };
+}
+
+export const googleProvider: RoutingProvider = createGoogleProvider();
+

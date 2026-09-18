@@ -50,10 +50,11 @@ async function findNearby(
   location: { lat: number; lng: number },
   type: string,
   radius: number,
-  maxResults = 5
-  , preferred?: MapProviderName
+  maxResults = 5,
+  preferred?: MapProviderName,
+  apiKeyOverride?: string
 ): Promise<Place[]> {
-  const provider = getRoutingProvider(preferred);
+  const provider = getRoutingProvider(preferred, apiKeyOverride);
   const results = await provider.searchNearby(location, type, radius, maxResults);
   return results.map(toPlace);
 }
@@ -103,7 +104,8 @@ function getMidpointOfLegs(legs: RouteLeg[]): { lat: number; lng: number } {
 export async function planTrip(
   waypoints: Waypoint[],
   settings: TripSettings,
-  preferredProvider?: MapProviderName
+  preferredProvider?: MapProviderName,
+  apiKeyOverride?: string
 ): Promise<TripPlan> {
   if (waypoints.length < 2) {
     throw new Error('Add at least 2 places — a starting point and at least one destination.');
@@ -121,7 +123,7 @@ export async function planTrip(
     ? waypoints.slice(1, -1)
     : waypoints.slice(1);
 
-  const provider = getRoutingProvider(preferredProvider);
+  const provider = getRoutingProvider(preferredProvider, apiKeyOverride);
   const route = await provider.getRoute(origin, destination, intermediates, settings);
   const { legs, waypointOrder, overviewPolyline } = route;
 
@@ -140,13 +142,13 @@ export async function planTrip(
 
       const [gasStops, hotelSuggestions, attractions, restaurants, evChargingStops, campgrounds, parkingStops] =
         await Promise.all([
-          findGasStationsAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider),
-          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'lodging', SEARCH_RADIUS.HOTEL, 5, preferredProvider),
-          findAttractions(dayLegs, preferredProvider),
-          findRestaurants(dayLegs, preferredProvider),
-          findEvChargingAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider),
-          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'campground', SEARCH_RADIUS.CAMPGROUND, 3, preferredProvider),
-          findParkingAlongDay(dayLegs, preferredProvider),
+          findGasStationsAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider, apiKeyOverride),
+          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'lodging', SEARCH_RADIUS.HOTEL, 5, preferredProvider, apiKeyOverride),
+          findAttractions(dayLegs, preferredProvider, apiKeyOverride),
+          findRestaurants(dayLegs, preferredProvider, apiKeyOverride),
+          findEvChargingAlongDay(dayLegs, settings.fuelRangeKm, preferredProvider, apiKeyOverride),
+          isLastDay ? Promise.resolve([]) : findNearby(endLeg.endLocation, 'campground', SEARCH_RADIUS.CAMPGROUND, 3, preferredProvider, apiKeyOverride),
+          findParkingAlongDay(dayLegs, preferredProvider, apiKeyOverride),
         ]);
 
       const isEV = !!settings.evProfile?.enabled;
@@ -531,7 +533,7 @@ function groupLegsIntoDays(legs: RouteLeg[], settings: TripSettings): DayGroup[]
 
 // ─── Place Finders ──────────────────────────────────────────────────────────
 
-async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number, preferred?: MapProviderName): Promise<Place[]> {
+async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number, preferred?: MapProviderName, apiKeyOverride?: string): Promise<Place[]> {
   const intervalKm = fuelRangeKm * FUEL_BUFFER_FACTOR;
   const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
   if (totalKm < intervalKm * 0.5) return [];
@@ -541,7 +543,7 @@ async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number, pr
   const results: Place[] = [];
   const allStations = await Promise.all(
     samplePoints.slice(0, 3).map((point) =>
-      findNearby(point, 'gas_station', SEARCH_RADIUS.GAS_STATION, 2, preferred)
+      findNearby(point, 'gas_station', SEARCH_RADIUS.GAS_STATION, 2, preferred, apiKeyOverride)
     )
   );
   for (const stations of allStations) {
@@ -550,13 +552,13 @@ async function findGasStationsAlongDay(legs: RouteLeg[], fuelRangeKm: number, pr
   return results;
 }
 
-async function findAttractions(legs: RouteLeg[], preferred?: MapProviderName): Promise<Place[]> {
+async function findAttractions(legs: RouteLeg[], preferred?: MapProviderName, apiKeyOverride?: string): Promise<Place[]> {
   const midpoint = getMidpointOfLegs(legs);
   const fetchEnd = legs.length > 1
-    ? findNearby(legs[legs.length - 1].endLocation, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 3, preferred)
+    ? findNearby(legs[legs.length - 1].endLocation, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 3, preferred, apiKeyOverride)
     : Promise.resolve<Place[]>([]);
   const [attractions, endAttractions] = await Promise.all([
-    findNearby(midpoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 5, preferred),
+    findNearby(midpoint, 'tourist_attraction', SEARCH_RADIUS.ATTRACTION, 5, preferred, apiKeyOverride),
     fetchEnd,
   ]);
   const seen = new Set(attractions.map((a) => a.id));
@@ -564,11 +566,11 @@ async function findAttractions(legs: RouteLeg[], preferred?: MapProviderName): P
   return attractions.slice(0, 6);
 }
 
-async function findRestaurants(legs: RouteLeg[], preferred?: MapProviderName): Promise<Place[]> {
-  return findNearby(getMidpointOfLegs(legs), 'restaurant', SEARCH_RADIUS.RESTAURANT, 4, preferred);
+async function findRestaurants(legs: RouteLeg[], preferred?: MapProviderName, apiKeyOverride?: string): Promise<Place[]> {
+  return findNearby(getMidpointOfLegs(legs), 'restaurant', SEARCH_RADIUS.RESTAURANT, 4, preferred, apiKeyOverride);
 }
 
-async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number, preferred?: MapProviderName): Promise<Place[]> {
+async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number, preferred?: MapProviderName, apiKeyOverride?: string): Promise<Place[]> {
   const intervalKm = fuelRangeKm * FUEL_BUFFER_FACTOR;
   const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
   if (totalKm < intervalKm * 0.5) return [];
@@ -578,7 +580,7 @@ async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number, pre
   const results: Place[] = [];
   const allStations = await Promise.all(
     samplePoints.slice(0, 3).map((point) =>
-      findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2, preferred)
+      findNearby(point, 'electric_vehicle_charging_station', SEARCH_RADIUS.EV_CHARGING, 2, preferred, apiKeyOverride)
     )
   );
   for (const stations of allStations) {
@@ -587,7 +589,7 @@ async function findEvChargingAlongDay(legs: RouteLeg[], fuelRangeKm: number, pre
   return results;
 }
 
-async function findParkingAlongDay(legs: RouteLeg[], preferred?: MapProviderName): Promise<Place[]> {
+async function findParkingAlongDay(legs: RouteLeg[], preferred?: MapProviderName, apiKeyOverride?: string): Promise<Place[]> {
   const totalKm = legs.reduce((s, l) => s + l.distanceMeters, 0) / 1000;
   if (totalKm < 25) return [];
 
@@ -616,7 +618,7 @@ async function findParkingAlongDay(legs: RouteLeg[], preferred?: MapProviderName
   for (const point of samplePoints.slice(0, 3)) {
     try {
       if (preferred === 'google') {
-        const places = await findNearby(point, 'parking', SEARCH_RADIUS.HIGHWAY_REST_STOP, 2, preferred);
+        const places = await findNearby(point, 'parking', SEARCH_RADIUS.HIGHWAY_REST_STOP, 2, preferred, apiKeyOverride);
         for (const p of places) {
           if (!seen.has(p.id)) {
             seen.add(p.id);
@@ -632,7 +634,7 @@ async function findParkingAlongDay(legs: RouteLeg[], preferred?: MapProviderName
           }
         }
       } else {
-        const hereParking = await fetchHereParking(point, SEARCH_RADIUS.HIGHWAY_REST_STOP, true);
+        const hereParking = await fetchHereParking(point, SEARCH_RADIUS.HIGHWAY_REST_STOP, true, undefined, apiKeyOverride);
         for (const item of hereParking) {
           if (!seen.has(item.id)) {
             seen.add(item.id);

@@ -48,6 +48,7 @@ export default function Home() {
   const [focusedDrivingPlace, setFocusedDrivingPlace] = useState<Place | null>(null);
   const [mobileTab, setMobileTab] = useState<'sidebar' | 'map'>('sidebar');
   const [isApiStatusModalOpen, setIsApiStatusModalOpen] = useState(false);
+  const [apiStatusModalTab, setApiStatusModalTab] = useState<'quota' | 'byok'>('quota');
   const [isCityParkingModalOpen, setIsCityParkingModalOpen] = useState(false);
 
   // Accumulated waypoints used for the active plan (includes search-added stops)
@@ -669,7 +670,10 @@ export default function Home() {
         setError(null);
       }}
       onRetry={() => handlePlanTrip()}
-      onOpenStatusModal={() => setIsApiStatusModalOpen(true)}
+      onOpenStatusModal={(tab) => {
+        setApiStatusModalTab(tab || 'quota');
+        setIsApiStatusModalOpen(true);
+      }}
       onDismiss={() => setError(null)}
     />
   );
@@ -679,6 +683,7 @@ export default function Home() {
       isOpen={isApiStatusModalOpen}
       onClose={() => setIsApiStatusModalOpen(false)}
       activeProvider={mapProvider === 'here' ? 'here' : 'google'}
+      initialTab={apiStatusModalTab}
       onSwitchProvider={(nextProv) => {
         handlePickProvider(nextProv);
         setIsApiStatusModalOpen(false);

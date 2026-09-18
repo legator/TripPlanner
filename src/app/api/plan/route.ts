@@ -3,6 +3,7 @@ import { planTrip } from '@/lib/tripPlanner';
 import { PlanTripRequestWithProvider } from '@/lib/types';
 import { validateWaypoints, validateAndClampSettings } from '@/lib/validation';
 import { getRedisClient } from '@/lib/redisClient';
+import { checkAndIncrementUserPlanQuota, UserQuotaExceededError } from '@/lib/quota/userQuotaGuard';
 
 const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 60_000;
@@ -62,6 +63,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const clientId = request.headers.get('x-client-id') || 'anonymous';
+    const customGoogleKey = request.headers.get('x-custom-google-key') || undefined;
+    const customHereKey = request.headers.get('x-custom-here-key') || undefined;
+
     const body: PlanTripRequestWithProvider = await request.json();
 
     const waypointError = validateWaypoints(body?.waypoints);
@@ -78,26 +83,57 @@ export async function POST(request: NextRequest) {
     const envProvider = process.env.MAP_PROVIDER || process.env.NEXT_PUBLIC_MAP_PROVIDER;
     const provider = requestedProvider ?? (envProvider === 'here' ? 'here' : 'google');
 
-    if (provider === 'google') {
+    const activeCustomKey = provider === 'google' ? customGoogleKey : customHereKey;
+    const hasCustomKey = Boolean(activeCustomKey && activeCustomKey.trim().length > 5);
+
+    // Enforce per-user quota (BYOK users bypass and are not deducted)
+    let userQuotaStatus;
+    try {
+      userQuotaStatus = await checkAndIncrementUserPlanQuota(clientId, hasCustomKey);
+    } catch (quotaError) {
+      if (quotaError instanceof UserQuotaExceededError) {
+        return NextResponse.json(
+          {
+            error: quotaError.message,
+            code: quotaError.code,
+            quota: quotaError.status,
+            allowBYOK: true,
+          },
+          { status: 429 }
+        );
+      }
+      throw quotaError;
+    }
+
+    // Validate that a key is available (either custom or server default)
+    if (provider === 'google' && !hasCustomKey) {
       const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
       if (!apiKey || apiKey === 'your_google_maps_api_key_here') {
         return NextResponse.json(
-          { error: 'Google Maps API key is not configured on the server' },
+          { error: 'Google Maps API key is not configured on the server. You can provide your own key in Settings.' },
           { status: 500 }
         );
       }
-    } else if (provider === 'here') {
+    } else if (provider === 'here' && !hasCustomKey) {
       const hereKey = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY;
       if (!hereKey || hereKey === 'your_here_api_key_here') {
         return NextResponse.json(
-          { error: 'HERE Maps API key is not configured on the server' },
+          { error: 'HERE Maps API key is not configured on the server. You can provide your own key in Settings.' },
           { status: 500 }
         );
       }
     }
 
-    const tripPlan = await planTrip(body.waypoints, settings, provider);
-    return NextResponse.json(tripPlan);
+    const tripPlan = await planTrip(body.waypoints, settings, provider, activeCustomKey);
+
+    const headers: Record<string, string> = {
+      'x-quota-tier': userQuotaStatus.tier,
+      'x-quota-monthly-used': String(userQuotaStatus.monthly.used),
+      'x-quota-monthly-remaining': String(userQuotaStatus.monthly.remaining),
+      'x-quota-daily-used': String(userQuotaStatus.daily.used),
+    };
+
+    return NextResponse.json(tripPlan, { headers });
   } catch (error) {
     console.error('Trip planning error:', error);
 

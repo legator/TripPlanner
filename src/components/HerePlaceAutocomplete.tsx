@@ -3,8 +3,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Waypoint } from '@/lib/types';
 import { generateUUID } from '@/lib/uuid';
+import { getCustomKey } from '@/lib/userKeys';
 
-const HERE_API_KEY = process.env.NEXT_PUBLIC_HERE_API_KEY || '';
+function getEffectiveHereKey(): string {
+  return getCustomKey('here') || process.env.NEXT_PUBLIC_HERE_API_KEY || '';
+}
 
 interface HerePlaceAutocompleteProps {
   onPlaceSelect: (waypoint: Waypoint) => void;
@@ -40,8 +43,9 @@ export default function HerePlaceAutocomplete({
     }
     setIsLoading(true);
     try {
+      const apiKey = getEffectiveHereKey();
       const url = new URL('https://autocomplete.search.hereapi.com/v1/autocomplete');
-      url.searchParams.set('apiKey', HERE_API_KEY);
+      url.searchParams.set('apiKey', apiKey);
       url.searchParams.set('q', q);
       url.searchParams.set('lang', 'en');
       url.searchParams.set('limit', '6');
@@ -99,7 +103,7 @@ export default function HerePlaceAutocomplete({
     // Otherwise look up coordinates via the HERE Lookup API
     try {
       const url = new URL('https://lookup.search.hereapi.com/v1/lookup');
-      url.searchParams.set('apiKey', HERE_API_KEY);
+      url.searchParams.set('apiKey', getEffectiveHereKey());
       url.searchParams.set('id', suggestion.id);
       url.searchParams.set('lang', 'en');
       const res = await fetch(url.toString());
