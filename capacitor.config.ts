@@ -6,11 +6,13 @@ import type { CapacitorConfig } from '@capacitor/cli';
 // - If no server URL is provided in production, server is omitted to prevent baking in private LAN IPs
 const serverUrl =
   process.env.CAPACITOR_SERVER_URL ||
-  (process.env.NODE_ENV === 'development' ? 'http://192.168.0.163:3000' : undefined);
+  (process.env.NODE_ENV === 'development'
+    ? 'http://192.168.0.163:3000'
+    : 'https://trip-planner-road-trip.vercel.app');
 
 const config: CapacitorConfig = {
-  appId: 'com.tripplanner.app',
-  appName: 'TripPlanner',
+  appId: 'com.arleons.tripplanner.app',
+  appName: 'TripPlanner: Road Trip',
   webDir: 'public',
   server: serverUrl
     ? {

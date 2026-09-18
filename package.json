@@ -1,6 +1,6 @@
 {
   "name": "trip-planner",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
@@ -13,6 +13,8 @@
     "build:mobile": "npm run build && cap sync",
     "build:android": "npm run build && cap sync android && cd android && ./gradlew assembleDebug",
     "build:android:release": "npm run build && cap sync android && cd android && ./gradlew assembleRelease",
+    "build:android:bundle": "npm run build && cap sync android && cd android && ./gradlew bundleRelease",
+    "verify:release": "node scripts/verify-release-bundle.mjs",
     "build:ios:sim": "npm run build && cap sync ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -destination \"generic/platform=iOS Simulator\" clean build CODE_SIGNING_ALLOWED=NO"
   },
   "dependencies": {

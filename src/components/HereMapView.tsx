@@ -5,7 +5,6 @@ import { useHereMaps } from './HereMapsProvider';
 import { DayPlan, Waypoint, Place, TrafficIncident } from '@/lib/types';
 import { DAY_COLORS, MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/lib/constants';
 import { decodePolyline } from '@/lib/tripGpxExport';
-import { callHereIsoline } from '@/lib/providers/here';
 import { LiveDrivingPosition, getCurrentCoordinates, reverseGeocodeCoordinates } from '@/lib/location';
 import { generateUUID } from '@/lib/uuid';
 
@@ -455,8 +454,11 @@ export default function HereMapView({
       el.style.transform = 'scale(1.2)';
       setTimeout(() => { el.style.transform = 'none'; }, 200);
       try {
-        const points = await callHereIsoline(lat, lng, 15, 'car');
-        setIsolinePoints(points);
+        const res = await fetch(`/api/route/isoline?lat=${lat}&lng=${lng}&rangeMins=15&mode=car`);
+        if (res.ok) {
+          const data = await res.json();
+          setIsolinePoints(data.points || []);
+        }
       } catch (err) {
         console.error('Failed to fetch isoline:', err);
       }

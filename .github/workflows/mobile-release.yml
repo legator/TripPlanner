@@ -135,7 +135,7 @@ jobs:
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: com.tripplanner.app
+          packageName: com.arleons.tripplanner.app
           releaseFiles: ${{ steps.sign_bundle.outputs.signedReleaseFile || 'android/app/build/outputs/bundle/release/*.aab' }}
           track: ${{ github.event.inputs.track || 'internal' }}
           status: completed
