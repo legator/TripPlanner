@@ -8,6 +8,7 @@ import {
   useEffect,
   useState,
 } from 'react';
+import { getCustomKey } from '@/lib/userKeys';
 
 interface GoogleMapsContextValue {
   isLoaded: boolean;
@@ -41,11 +42,12 @@ export function GoogleMapsProvider({ children }: { children: ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const customKey = getCustomKey('google');
+    const apiKey = customKey || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
     if (!apiKey || apiKey === 'your_google_maps_api_key_here') {
       setLoadError(
-        'Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in your .env.local file.'
+        'Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY or provide your own key in Settings.'
       );
       return;
     }

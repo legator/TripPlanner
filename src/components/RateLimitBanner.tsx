@@ -8,7 +8,7 @@ interface RateLimitBannerProps {
   activeProvider?: 'google' | 'here';
   onSwitchProvider?: (provider: 'google' | 'here') => void;
   onRetry?: () => void;
-  onOpenStatusModal?: () => void;
+  onOpenStatusModal?: (tab?: 'quota' | 'byok') => void;
   onDismiss?: () => void;
 }
 
@@ -22,16 +22,20 @@ export default function RateLimitBanner({
 }: RateLimitBannerProps) {
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
 
+  const isUserQuota = error
+    ? /free tier|monthly quota|trip planning limit|user_quota_exceeded/i.test(error)
+    : false;
+
   const rateDetails = error ? parseRateLimitDetails(error, activeProvider) : null;
-  const isLimit = rateDetails?.isRateLimit ?? false;
+  const isLimit = isUserQuota || (rateDetails?.isRateLimit ?? false);
 
   useEffect(() => {
-    if (!isLimit || !rateDetails) {
+    if (!isLimit || isUserQuota) {
       setSecondsRemaining(null);
       return;
     }
 
-    setSecondsRemaining(rateDetails.retryAfter || 60);
+    setSecondsRemaining(rateDetails?.retryAfter || 60);
     const interval = setInterval(() => {
       setSecondsRemaining((prev) => {
         if (prev === null || prev <= 1) {
@@ -43,9 +47,9 @@ export default function RateLimitBanner({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [error, isLimit, rateDetails]);
+  }, [error, isLimit, isUserQuota, rateDetails]);
 
-  if (!isLimit || !rateDetails) return null;
+  if (!isLimit) return null;
 
   const targetAlt: 'google' | 'here' = activeProvider === 'google' ? 'here' : 'google';
   const altName = targetAlt === 'here' ? 'HERE Maps' : 'Google Maps';
@@ -58,44 +62,84 @@ export default function RateLimitBanner({
 
   return (
     <div className="relative z-30 mx-3 sm:mx-6 my-2 animate-slideDown pointer-events-auto">
-      <div className="bg-gradient-to-r from-amber-950/95 via-gray-900/95 to-red-950/95 text-white border border-amber-500/40 rounded-2xl p-3.5 sm:p-4 shadow-2xl backdrop-blur-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div
+        className={`text-white border rounded-2xl p-3.5 sm:p-4 shadow-2xl backdrop-blur-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+          isUserQuota
+            ? 'bg-gradient-to-r from-purple-950/95 via-gray-900/95 to-blue-950/95 border-purple-500/40'
+            : 'bg-gradient-to-r from-amber-950/95 via-gray-900/95 to-red-950/95 border-amber-500/40'
+        }`}
+      >
         {/* Warning info */}
         <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center shrink-0 text-lg">
-            ⚠️
+          <div
+            className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 text-lg ${
+              isUserQuota
+                ? 'bg-purple-500/20 border-purple-400/40'
+                : 'bg-amber-500/20 border-amber-400/40'
+            }`}
+          >
+            {isUserQuota ? '🔑' : '⚠️'}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                API Limit Exceeded • {currentName}
+              <span
+                className={`text-xs font-bold uppercase tracking-wider ${
+                  isUserQuota ? 'text-purple-300' : 'text-amber-300'
+                }`}
+              >
+                {isUserQuota
+                  ? 'Personal Free Trip Limit Reached'
+                  : `API Limit Exceeded • ${currentName}`}
               </span>
-              {secondsRemaining !== null && secondsRemaining > 0 && (
+              {secondsRemaining !== null && secondsRemaining > 0 && !isUserQuota && (
                 <span className="text-[10px] font-mono bg-amber-500/20 text-amber-200 px-1.5 py-0.5 rounded border border-amber-500/30">
                   Cooldown: {secondsRemaining}s
                 </span>
               )}
             </div>
             <p className="text-xs text-gray-200 mt-0.5 leading-snug">
-              {rateDetails.message || `${currentName} request limit or daily quota reached.`}
-              {' '}You can seamlessly switch to <strong>{altName}</strong> to continue planning your trip without delay.
+              {isUserQuota ? (
+                <>
+                  You have reached your device limit on the shared free tier.{' '}
+                  <strong>Add your own free Google or HERE API key</strong> in Settings to plan
+                  unlimited trips immediately.
+                </>
+              ) : (
+                <>
+                  {rateDetails?.message || `${currentName} request limit or daily quota reached.`}{' '}
+                  You can seamlessly switch to <strong>{altName}</strong> to continue planning your
+                  trip without delay.
+                </>
+              )}
             </p>
           </div>
         </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 self-end sm:self-center shrink-0 flex-wrap">
-          {onSwitchProvider && (
+          {isUserQuota ? (
             <button
               type="button"
-              onClick={handleSwitch}
-              className="py-1.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg transition-all transform active:scale-95 flex items-center gap-1.5"
+              onClick={() => onOpenStatusModal?.('byok')}
+              className="py-1.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg transition-all transform active:scale-95 flex items-center gap-1.5"
             >
-              <span>🔄</span>
-              <span>Switch to {altName}</span>
+              <span>🔑</span>
+              <span>Add Custom Key (BYOK)</span>
             </button>
+          ) : (
+            onSwitchProvider && (
+              <button
+                type="button"
+                onClick={handleSwitch}
+                className="py-1.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg transition-all transform active:scale-95 flex items-center gap-1.5"
+              >
+                <span>🔄</span>
+                <span>Switch to {altName}</span>
+              </button>
+            )
           )}
 
-          {onRetry && (
+          {onRetry && !isUserQuota && (
             <button
               type="button"
               onClick={onRetry}
@@ -109,11 +153,11 @@ export default function RateLimitBanner({
           {onOpenStatusModal && (
             <button
               type="button"
-              onClick={onOpenStatusModal}
+              onClick={() => onOpenStatusModal(isUserQuota ? 'byok' : 'quota')}
               className="py-1.5 px-2 rounded-xl text-gray-400 hover:text-white text-xs hover:bg-white/10 transition-colors"
               title="View API Usage and Limits"
             >
-              Stats
+              {isUserQuota ? 'Keys' : 'Stats'}
             </button>
           )}
 

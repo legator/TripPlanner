@@ -13,7 +13,8 @@ import { Waypoint, TripSettings } from '../types';
 import { RoutingProvider, RouteResult, RouteLeg, RouteStep, NearbyPlace } from './types';
 import { checkAndIncrementHereQuota } from '../quota/hereQuotaGuard';
 
-const API_KEY = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY!;
+const DEFAULT_API_KEY = process.env.HERE_API_KEY || process.env.NEXT_PUBLIC_HERE_API_KEY!;
+const API_KEY = DEFAULT_API_KEY;
 
 // ─── Google Polyline encoder (needed to re-encode HERE flexible polylines) ───
 
@@ -89,12 +90,18 @@ async function callHereRouting(
   origin: Waypoint,
   destination: Waypoint,
   intermediates: Waypoint[],
-  settings: TripSettings
+  settings: TripSettings,
+  apiKey?: string
 ): Promise<HereSection[]> {
-  await checkAndIncrementHereQuota('routing', 1);
+  const activeKey = apiKey?.trim() || DEFAULT_API_KEY;
+  const isCustomKey = Boolean(apiKey && apiKey.trim().length > 5);
+
+  if (!isCustomKey) {
+    await checkAndIncrementHereQuota('routing', 1);
+  }
 
   const url = new URL('https://router.hereapi.com/v8/routes');
-  url.searchParams.set('apiKey', API_KEY);
+  url.searchParams.set('apiKey', activeKey);
   url.searchParams.set('transportMode', settings.transportMode || 'car');
   url.searchParams.set('return', 'polyline,summary,tolls');
   url.searchParams.set('origin', `${origin.location.lat},${origin.location.lng}`);
@@ -291,22 +298,28 @@ export async function fetchHereParking(
   location: { lat: number; lng: number },
   radius: number = 3000,
   isHighway: boolean = false,
-  query?: string
+  query?: string,
+  apiKey?: string
 ): Promise<HereParkingPlace[]> {
   try {
-    await checkAndIncrementHereQuota('search', 1);
+    const activeKey = apiKey?.trim() || DEFAULT_API_KEY;
+    const isCustomKey = Boolean(apiKey && apiKey.trim().length > 5);
+
+    if (!isCustomKey) {
+      await checkAndIncrementHereQuota('search', 1);
+    }
 
     let url: URL;
     if (query && query.trim().length > 0) {
       url = new URL('https://discover.search.hereapi.com/v1/discover');
-      url.searchParams.set('apiKey', API_KEY);
+      url.searchParams.set('apiKey', activeKey);
       url.searchParams.set('at', `${location.lat},${location.lng}`);
       url.searchParams.set('q', query.trim());
       url.searchParams.set('limit', '15');
     } else if (isHighway) {
       // Highway Rest Areas and Motorway Service Stations
       url = new URL('https://browse.search.hereapi.com/v1/browse');
-      url.searchParams.set('apiKey', API_KEY);
+      url.searchParams.set('apiKey', activeKey);
       url.searchParams.set('at', `${location.lat},${location.lng}`);
       url.searchParams.set('categories', '700-7900-0140,800-8500-0178,700-7600-0116');
       url.searchParams.set('limit', '15');
@@ -314,7 +327,7 @@ export async function fetchHereParking(
     } else {
       // City Parking Garages and Lots
       url = new URL('https://browse.search.hereapi.com/v1/browse');
-      url.searchParams.set('apiKey', API_KEY);
+      url.searchParams.set('apiKey', activeKey);
       url.searchParams.set('at', `${location.lat},${location.lng}`);
       url.searchParams.set('categories', '800-8500-0178');
       url.searchParams.set('limit', '15');
@@ -406,15 +419,21 @@ async function callHereBrowse(
   location: { lat: number; lng: number },
   type: string,
   radius: number,
-  maxResults: number
+  maxResults: number,
+  apiKey?: string
 ): Promise<NearbyPlace[]> {
   const categoryId = HERE_CATEGORIES[type];
   if (!categoryId) return [];
 
-  await checkAndIncrementHereQuota('search', 1);
+  const activeKey = apiKey?.trim() || DEFAULT_API_KEY;
+  const isCustomKey = Boolean(apiKey && apiKey.trim().length > 5);
+
+  if (!isCustomKey) {
+    await checkAndIncrementHereQuota('search', 1);
+  }
 
   const url = new URL('https://browse.search.hereapi.com/v1/browse');
-  url.searchParams.set('apiKey', API_KEY);
+  url.searchParams.set('apiKey', activeKey);
   url.searchParams.set('at', `${location.lat},${location.lng}`);
   url.searchParams.set('categories', categoryId);
   url.searchParams.set('limit', String(Math.min(maxResults, 20)));
@@ -455,36 +474,41 @@ async function callHereBrowse(
 
 // ─── Provider implementation ─────────────────────────────────────────────────
 
-export const hereProvider: RoutingProvider = {
-  async getRoute(origin, destination, intermediates, settings): Promise<RouteResult> {
-    const sections = await callHereRouting(origin, destination, intermediates, settings);
+export function createHereProvider(apiKeyOverride?: string): RoutingProvider {
+  return {
+    async getRoute(origin, destination, intermediates, settings): Promise<RouteResult> {
+      const sections = await callHereRouting(origin, destination, intermediates, settings, apiKeyOverride);
 
-    // Build address labels from waypoints (HERE doesn't return address strings)
-    const allWaypoints = [origin, ...intermediates, destination];
-    const legs: RouteLeg[] = sections.map((section, i) => {
-      const startLabel = allWaypoints[i]?.name || `Stop ${i + 1}`;
-      const endLabel = allWaypoints[i + 1]?.name || `Stop ${i + 2}`;
-      return hereSectionToRouteLeg(section, startLabel, endLabel);
-    });
+      // Build address labels from waypoints (HERE doesn't return address strings)
+      const allWaypoints = [origin, ...intermediates, destination];
+      const legs: RouteLeg[] = sections.map((section, i) => {
+        const startLabel = allWaypoints[i]?.name || `Stop ${i + 1}`;
+        const endLabel = allWaypoints[i + 1]?.name || `Stop ${i + 2}`;
+        return hereSectionToRouteLeg(section, startLabel, endLabel);
+      });
 
-    // Build overview polyline from all section polylines combined
-    const allPoints: [number, number][] = [];
-    for (const section of sections) {
-      const { polyline } = decodeFlexPolyline(section.polyline);
-      allPoints.push(...(polyline as [number, number][]));
-    }
-    const overviewPolyline = encodeGooglePolyline(allPoints);
+      // Build overview polyline from all section polylines combined
+      const allPoints: [number, number][] = [];
+      for (const section of sections) {
+        const { polyline } = decodeFlexPolyline(section.polyline);
+        allPoints.push(...(polyline as [number, number][]));
+      }
+      const overviewPolyline = encodeGooglePolyline(allPoints);
 
-    // HERE doesn't optimize waypoint order — return identity order
-    const waypointOrder = intermediates.map((_, i) => i);
+      // HERE doesn't optimize waypoint order — return identity order
+      const waypointOrder = intermediates.map((_, i) => i);
 
-    return { legs, waypointOrder, overviewPolyline };
-  },
+      return { legs, waypointOrder, overviewPolyline };
+    },
 
-  async searchNearby(location, type, radius, maxResults = 5): Promise<NearbyPlace[]> {
-    return callHereBrowse(location, type, radius, maxResults);
-  },
-};
+    async searchNearby(location, type, radius, maxResults = 5): Promise<NearbyPlace[]> {
+      return callHereBrowse(location, type, radius, maxResults, apiKeyOverride);
+    },
+  };
+}
+
+export const hereProvider: RoutingProvider = createHereProvider();
+
 
 // ─── HERE Matrix Routing API v8 ──────────────────────────────────────────────
 

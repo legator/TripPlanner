@@ -74,25 +74,25 @@ function chunkPointsByDistance(
   let currentChunk: Array<{ lat: number; lng: number }> = [points[0]];
   let currentDist = 0;
 
-  for (let i = 0; i < points.length - 1; i++) {
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const lat1 = (p1.lat * Math.PI) / 180;
-    const lat2 = (p2.lat * Math.PI) / 180;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const lat1 = (prev.lat * Math.PI) / 180;
+    const lat2 = (curr.lat * Math.PI) / 180;
     const dLat = lat2 - lat1;
-    const dLng = ((p2.lng - p1.lng) * Math.PI) / 180;
+    const dLng = ((curr.lng - prev.lng) * Math.PI) / 180;
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    const stepDist = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const dist = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    if (currentDist + stepDist > maxChunkMeters && currentChunk.length >= 2) {
+    if (currentDist + dist > maxChunkMeters && currentChunk.length >= 2) {
       chunks.push(currentChunk);
-      currentChunk = [p1, p2];
-      currentDist = stepDist;
+      currentChunk = [prev, curr];
+      currentDist = dist;
     } else {
-      currentChunk.push(p2);
-      currentDist += stepDist;
+      currentChunk.push(curr);
+      currentDist += dist;
     }
   }
 
@@ -100,7 +100,7 @@ function chunkPointsByDistance(
     chunks.push(currentChunk);
   }
 
-  return chunks;
+  return chunks.length > 0 ? chunks : [points];
 }
 
 interface TrafficQuery {
@@ -112,8 +112,9 @@ interface TrafficQuery {
   limit?: number | null;
 }
 
-async function processTrafficIncidents(query: TrafficQuery) {
-  if (!HERE_API_KEY) {
+async function processTrafficIncidents(query: TrafficQuery, customKey?: string) {
+  const activeKey = customKey?.trim() || HERE_API_KEY;
+  if (!activeKey) {
     return NextResponse.json(
       { error: 'HERE API key is not configured' },
       { status: 500 }
@@ -187,7 +188,7 @@ async function processTrafficIncidents(query: TrafficQuery) {
         url.searchParams.set('in', filter);
         url.searchParams.set('locationReferencing', 'shape');
         url.searchParams.set('lang', 'en');
-        url.searchParams.set('apiKey', HERE_API_KEY);
+        url.searchParams.set('apiKey', activeKey);
 
         try {
           const res = await fetch(url.toString(), {
@@ -201,11 +202,9 @@ async function processTrafficIncidents(query: TrafficQuery) {
             if (data.sourceUpdated) {
               sourceUpdated = data.sourceUpdated;
             }
-          } else {
-            console.warn('HERE Traffic API v7 partial error:', res.status, await res.text());
           }
         } catch (err) {
-          console.warn('HERE Traffic sub-request failed:', err);
+          console.warn('HERE Traffic Incidents fetch failed:', err);
         }
       })
     );
@@ -223,8 +222,8 @@ async function processTrafficIncidents(query: TrafficQuery) {
       seenIds.add(id);
 
       const type = normalizeType(details.type, details.roadClosed);
-      const summary = details.summary?.value || details.description?.value || details.typeDescription?.value || 'Traffic Alert';
-      const description = details.description?.value || summary;
+      const description = details.description?.value || details.typeDescription?.value || '';
+      const summary = details.summary?.value || description.slice(0, 120);
 
       incidents.push({
         id,
@@ -263,6 +262,7 @@ async function processTrafficIncidents(query: TrafficQuery) {
 }
 
 export async function GET(request: NextRequest) {
+  const customKey = request.headers.get('x-custom-here-key') || undefined;
   const { searchParams } = new URL(request.url);
   const corridor = searchParams.get('corridor');
   const latStr = searchParams.get('lat');
@@ -278,11 +278,12 @@ export async function GET(request: NextRequest) {
     radius: radiusStr ? parseInt(radiusStr, 10) : null,
     bbox,
     limit: limitStr ? parseInt(limitStr, 10) : null,
-  });
+  }, customKey);
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const customKey = request.headers.get('x-custom-here-key') || undefined;
     const body = await request.json();
     return processTrafficIncidents({
       corridor: body.corridor,
@@ -291,7 +292,7 @@ export async function POST(request: NextRequest) {
       radius: body.radius != null ? Number(body.radius) : null,
       bbox: body.bbox,
       limit: body.limit != null ? Number(body.limit) : null,
-    });
+    }, customKey);
   } catch {
     return NextResponse.json({ error: 'Invalid JSON request body' }, { status: 400 });
   }

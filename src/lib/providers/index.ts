@@ -1,6 +1,6 @@
 import { RoutingProvider } from './types';
-import { googleProvider } from './google';
-import { hereProvider } from './here';
+import { googleProvider, createGoogleProvider } from './google';
+import { hereProvider, createHereProvider } from './here';
 
 export type MapProviderName = 'google' | 'here';
 
@@ -9,8 +9,11 @@ export function getMapProviderName(): MapProviderName {
   return val === 'here' ? 'here' : 'google';
 }
 
-export function getRoutingProvider(preferred?: MapProviderName): RoutingProvider {
+export function getRoutingProvider(preferred?: MapProviderName, apiKeyOverride?: string): RoutingProvider {
   const name = preferred ?? getMapProviderName();
+  if (apiKeyOverride) {
+    return name === 'here' ? createHereProvider(apiKeyOverride) : createGoogleProvider(apiKeyOverride);
+  }
   return name === 'here' ? hereProvider : googleProvider;
 }
 
